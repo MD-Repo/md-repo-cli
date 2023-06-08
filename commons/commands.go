@@ -34,11 +34,11 @@ func GetAccount(ticket *MDRepoTicket) (*irodsclient_types.IRODSAccount, error) {
 		CSNegotiationPolicy:     irodsclient_types.CSNegotiationRequireTCP,
 		Host:                    mdRepoHost,
 		Port:                    mdRepoPort,
-		ClientUser:              "anonymous",
+		ClientUser:              mdRepoUser,
 		ClientZone:              mdRepoZone,
-		ProxyUser:               "anonymous",
+		ProxyUser:               mdRepoUser,
 		ProxyZone:               mdRepoZone,
-		Password:                "",
+		Password:                mdRepoUserPassword,
 		Ticket:                  ticket.IRODSTicket,
 		DefaultResource:         "",
 		PamTTL:                  1,
@@ -54,6 +54,8 @@ func SetCommonFlags(command *cobra.Command) {
 	command.Flags().String("log_level", "", "Set log level")
 
 	// this is hidden
+	command.Flags().Bool("plaintext_ticket", false, "Use ticket in plaintext")
+	command.Flags().MarkHidden("plaintext_ticket")
 	command.Flags().Bool("retry_child", false, "Set this to retry child process")
 	command.Flags().MarkHidden("retry_child")
 }
@@ -151,10 +153,22 @@ func ProcessCommonFlags(command *cobra.Command) (bool, error) {
 		}
 	}
 
-	passwordFlag := command.Flags().Lookup("password")
-	if passwordFlag != nil {
-		// load to global variable
-		appConfig.Password = passwordFlag.Value.String()
+	plaintextTicketFlag := command.Flags().Lookup("plaintext_ticket")
+	if plaintextTicketFlag != nil {
+		plaintextTicketValue, err := strconv.ParseBool(plaintextTicketFlag.Value.String())
+		if err != nil {
+			appConfig.NoPassword = false
+		} else {
+			appConfig.NoPassword = plaintextTicketValue
+		}
+	}
+
+	if !appConfig.NoPassword {
+		passwordFlag := command.Flags().Lookup("password")
+		if passwordFlag != nil {
+			// load to global variable
+			appConfig.Password = passwordFlag.Value.String()
+		}
 	}
 
 	return true, nil // contiue
@@ -164,25 +178,27 @@ func ProcessCommonFlags(command *cobra.Command) (bool, error) {
 func InputMissingFields() (bool, error) {
 	updated := false
 
-	password := appConfig.Password
-	for len(password) == 0 {
-		fmt.Print("MDRepo User Password: ")
-		bytePassword, err := term.ReadPassword(int(syscall.Stdin))
-		if err != nil {
-			return false, xerrors.Errorf("failed to read password: %w", err)
-		}
+	if !appConfig.NoPassword {
+		password := appConfig.Password
+		for len(password) == 0 {
+			fmt.Print("MDRepo User Password: ")
+			bytePassword, err := term.ReadPassword(int(syscall.Stdin))
+			if err != nil {
+				return false, xerrors.Errorf("failed to read password: %w", err)
+			}
 
-		fmt.Print("\n")
-		password = string(bytePassword)
+			fmt.Print("\n")
+			password = string(bytePassword)
 
-		if len(password) == 0 {
-			fmt.Println("Please provide password")
-			fmt.Println("")
-		} else {
-			updated = true
+			if len(password) == 0 {
+				fmt.Println("Please provide password")
+				fmt.Println("")
+			} else {
+				updated = true
+			}
 		}
+		appConfig.Password = password
 	}
-	appConfig.Password = password
 
 	return updated, nil
 }
@@ -200,6 +216,7 @@ func InputMissingFieldsFromStdin() error {
 		return xerrors.Errorf("failed to read missing config values: %w", err)
 	}
 
+	appConfig.NoPassword = configTypeIn.NoPassword
 	appConfig.Password = configTypeIn.Password
 
 	return nil

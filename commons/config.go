@@ -7,26 +7,36 @@ import (
 )
 
 type Config struct {
-	Password string
+	NoPassword bool
+	Password   string
 }
 
 func GetDefaultConfig() *Config {
 	return &Config{
-		Password: "",
+		NoPassword: false,
+		Password:   "",
 	}
 }
 
 func (config *Config) GetMDRepoTicket(ticket string) (*MDRepoTicket, error) {
-	ticketObj, err := DecodeMDRepoTicket(ticket, config.Password)
-	if err != nil {
-		return nil, err
+	if config.NoPassword {
+		// plaintext ticket string
+		return GetMDRepoTicketFromPlainText(ticket)
 	}
 
-	return ticketObj, nil
+	return DecodeMDRepoTicket(ticket, config.Password)
+}
+
+func (config *Config) ToConfigTypeIn() *ConfigTypeIn {
+	return &ConfigTypeIn{
+		NoPassword: config.NoPassword,
+		Password:   config.Password,
+	}
 }
 
 type ConfigTypeIn struct {
-	Password string `yaml:"irods_user_password,omitempty"`
+	NoPassword bool   `yaml:"no_password,omitempty"`
+	Password   string `yaml:"irods_user_password,omitempty"`
 }
 
 // NewConfigTypeInFromYAML creates ConfigTypeIn from YAML

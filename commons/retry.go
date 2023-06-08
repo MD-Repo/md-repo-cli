@@ -46,9 +46,7 @@ func RunWithRetry(retry int, retryInterval int) error {
 }
 
 func runChild() error {
-	configTypeIn := &ConfigTypeIn{
-		Password: GetConfig().Password,
-	}
+	configTypeIn := GetConfig().ToConfigTypeIn()
 
 	configTypeInYamlBytes, err := configTypeIn.ToYAML()
 	if err != nil {

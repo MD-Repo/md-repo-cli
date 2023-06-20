@@ -189,7 +189,11 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 	parallelJobManager := commons.NewParallelJobManager(filesystem, uploadThreadNum, progress)
 
 	for _, sourcePath := range sourcePaths {
-		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, mdRepoTicket.IRODSDataPath, force, singleThreaded)
+		includeFirstDir := false
+		if len(sourcePaths) > 1 {
+			includeFirstDir = true
+		}
+		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, mdRepoTicket.IRODSDataPath, force, singleThreaded, includeFirstDir)
 		if err != nil {
 			return xerrors.Errorf("failed to submit %s to %s: %w", sourcePath, mdRepoTicket.IRODSDataPath, err)
 		}
@@ -230,7 +234,7 @@ func createSubmitStatusFile(filesystem *fs.FileSystem, submitStatusFile *commons
 
 	dataRootPath = commons.MakeIRODSLandingPath(dataRootPath)
 	statusFileName := commons.GetMDRepoStatusFilename()
-	statusFilePath := commons.MakeTargetIRODSFilePath(filesystem, dataRootPath, statusFileName)
+	statusFilePath := commons.MakeTargetIRODSFilePath(filesystem, statusFileName, dataRootPath)
 
 	localTempFile := filepath.Join(os.TempDir(), statusFileName)
 
@@ -252,10 +256,11 @@ func createSubmitStatusFile(filesystem *fs.FileSystem, submitStatusFile *commons
 		return xerrors.Errorf("failed to create submit status file to %s: %w", statusFilePath, err)
 	}
 
+	os.Remove(localTempFile)
 	return nil
 }
 
-func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile *commons.SubmitStatusFile, sourcePath string, targetPath string, force bool, singleThreaded bool) error {
+func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile *commons.SubmitStatusFile, sourcePath string, targetPath string, force bool, singleThreaded bool, includeFirstDir bool) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "main",
 		"function": "submitOne",
@@ -359,15 +364,18 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 		}
 
 		// make target dir
-		targetDir := path.Join(targetPath, filepath.Base(sourcePath))
-		err = filesystem.MakeDir(targetDir, true)
-		if err != nil {
-			return xerrors.Errorf("failed to make dir %s: %w", targetDir, err)
+		targetDir := targetPath
+		if includeFirstDir {
+			targetDir = path.Join(targetPath, filepath.Base(sourcePath))
+			err = filesystem.MakeDir(targetDir, true)
+			if err != nil {
+				return xerrors.Errorf("failed to make dir %s: %w", targetDir, err)
+			}
 		}
 
 		for _, entryInDir := range entries {
 			newSourcePath := filepath.Join(sourcePath, entryInDir.Name())
-			err = submitOne(parallelJobManager, submitStatusFile, newSourcePath, targetDir, force, singleThreaded)
+			err = submitOne(parallelJobManager, submitStatusFile, newSourcePath, targetDir, force, singleThreaded, true)
 			if err != nil {
 				return xerrors.Errorf("failed to perform put %s to %s: %w", newSourcePath, targetDir, err)
 			}

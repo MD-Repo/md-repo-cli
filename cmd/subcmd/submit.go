@@ -1,6 +1,7 @@
 package subcmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -32,9 +33,8 @@ func AddPutCommand(rootCmd *cobra.Command) {
 	submitCmd.Flags().Bool("single_threaded", false, "Transfer a file using a single thread")
 	submitCmd.Flags().Int("upload_thread_num", commons.MaxParallelJobThreadNumDefault, "Specify the number of upload threads")
 	submitCmd.Flags().String("tcp_buffer_size", commons.TcpBufferSizeStringDefault, "Specify TCP socket buffer size")
-	submitCmd.Flags().Bool("progress", false, "Display progress bar")
-	submitCmd.Flags().Bool("diff", false, "Submit files having different content")
-	submitCmd.Flags().Bool("no_hash", false, "Compare files without using md5 hash")
+	submitCmd.Flags().Bool("no_progress", false, "Do not display progress bar")
+
 	submitCmd.Flags().Int("retry", 1, "Retry if fails")
 	submitCmd.Flags().Int("retry_interval", 60, "Retry interval in seconds")
 
@@ -42,6 +42,11 @@ func AddPutCommand(rootCmd *cobra.Command) {
 }
 
 func processSubmitCommand(command *cobra.Command, args []string) error {
+	logger := log.WithFields(log.Fields{
+		"package":  "main",
+		"function": "processSubmitCommand",
+	})
+
 	cont, err := commons.ProcessCommonFlags(command)
 	if err != nil {
 		return xerrors.Errorf("failed to process common flags: %w", err)
@@ -95,30 +100,14 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 		}
 	}
 
-	progress := false
-	progressFlag := command.Flags().Lookup("progress")
-	if progressFlag != nil {
-		progress, err = strconv.ParseBool(progressFlag.Value.String())
+	progress := true
+	noProgressFlag := command.Flags().Lookup("no_progress")
+	if noProgressFlag != nil {
+		noProgress, err := strconv.ParseBool(noProgressFlag.Value.String())
 		if err != nil {
-			progress = false
-		}
-	}
-
-	diff := false
-	diffFlag := command.Flags().Lookup("diff")
-	if diffFlag != nil {
-		diff, err = strconv.ParseBool(diffFlag.Value.String())
-		if err != nil {
-			diff = false
-		}
-	}
-
-	noHash := false
-	noHashFlag := command.Flags().Lookup("no_hash")
-	if noHashFlag != nil {
-		noHash, err = strconv.ParseBool(noHashFlag.Value.String())
-		if err != nil {
-			noHash = false
+			progress = true
+		} else {
+			progress = !noProgress
 		}
 	}
 
@@ -184,26 +173,89 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 
 	defer filesystem.Release()
 
+	// display
+	logger.Debugf("submission iRODS ticket: %s", mdRepoTicket.IRODSTicket)
+	logger.Debugf("submission path: %s", mdRepoTicket.IRODSDataPath)
+
+	existingEntries, err := filesystem.List(mdRepoTicket.IRODSDataPath)
+	if err != nil {
+		return xerrors.Errorf("failed to list %s: %w", mdRepoTicket.IRODSDataPath, err)
+	}
+
+	logger.Debugf("found %d files in path %s", len(existingEntries), mdRepoTicket.IRODSDataPath)
+
+	submitStatusFile := commons.NewSubmitStatusFile()
+
 	parallelJobManager := commons.NewParallelJobManager(filesystem, uploadThreadNum, progress)
-	parallelJobManager.Start()
 
 	for _, sourcePath := range sourcePaths {
-		err = submitOne(parallelJobManager, sourcePath, mdRepoTicket.IRODSDataPath, force, singleThreaded, diff, noHash)
+		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, mdRepoTicket.IRODSDataPath, force, singleThreaded)
 		if err != nil {
 			return xerrors.Errorf("failed to submit %s to %s: %w", sourcePath, mdRepoTicket.IRODSDataPath, err)
 		}
 	}
 
 	parallelJobManager.DoneScheduling()
+
+	// status file
+	submitStatusFile.SetInProgress()
+	err = createSubmitStatusFile(filesystem, submitStatusFile, mdRepoTicket.IRODSDataPath)
+	if err != nil {
+		return xerrors.Errorf("failed to create status file on %s: %w", mdRepoTicket.IRODSDataPath, err)
+	}
+
+	parallelJobManager.Start()
 	err = parallelJobManager.Wait()
 	if err != nil {
+		submitStatusFile.SetErrored()
+		defer createSubmitStatusFile(filesystem, submitStatusFile, mdRepoTicket.IRODSDataPath)
 		return xerrors.Errorf("failed to perform parallel jobs: %w", err)
+	}
+
+	// status file
+	submitStatusFile.SetCompleted()
+	err = createSubmitStatusFile(filesystem, submitStatusFile, mdRepoTicket.IRODSDataPath)
+	if err != nil {
+		return xerrors.Errorf("failed to create status file on %s: %w", mdRepoTicket.IRODSDataPath, err)
 	}
 
 	return nil
 }
 
-func submitOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, targetPath string, force bool, singleThreaded bool, diff bool, noHash bool) error {
+func createSubmitStatusFile(filesystem *fs.FileSystem, submitStatusFile *commons.SubmitStatusFile, dataRootPath string) error {
+	logger := log.WithFields(log.Fields{
+		"package":  "main",
+		"function": "createStatusFile",
+	})
+
+	dataRootPath = commons.MakeIRODSLandingPath(dataRootPath)
+	statusFileName := commons.GetMDRepoStatusFilename()
+	statusFilePath := commons.MakeTargetIRODSFilePath(filesystem, dataRootPath, statusFileName)
+
+	localTempFile := filepath.Join(os.TempDir(), statusFileName)
+
+	logger.Debugf("creating local status file to %s", localTempFile)
+	jsonBytes, err := json.Marshal(submitStatusFile)
+	if err != nil {
+		return xerrors.Errorf("failed to marshal submit status file to json: %w", err)
+	}
+
+	err = os.WriteFile(localTempFile, jsonBytes, 0666)
+	if err != nil {
+		return xerrors.Errorf("failed to write submit status file to local: %w", err)
+	}
+
+	logger.Debugf("creating status file to %s", statusFilePath)
+
+	err = filesystem.UploadFile(localTempFile, statusFilePath, "", false, nil)
+	if err != nil {
+		return xerrors.Errorf("failed to create submit status file to %s: %w", statusFilePath, err)
+	}
+
+	return nil
+}
+
+func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile *commons.SubmitStatusFile, sourcePath string, targetPath string, force bool, singleThreaded bool) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "main",
 		"function": "submitOne",
@@ -251,31 +303,37 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, sourcePath string
 			return nil
 		}
 
+		md5hash, err := commons.HashLocalFileMD5(sourcePath)
+		if err != nil {
+			return xerrors.Errorf("failed to get hash for %s: %w", sourcePath, err)
+		}
+
+		submitStatusEntry := commons.SubmitStatusEntry{
+			IRODSPath: targetFilePath,
+			Size:      sourceStat.Size(),
+			MD5Hash:   md5hash,
+		}
+		submitStatusFile.AddFile(submitStatusEntry)
+
 		if exist {
 			targetEntry, err := commons.StatIRODSPath(filesystem, targetFilePath)
 			if err != nil {
 				return xerrors.Errorf("failed to stat %s: %w", targetFilePath, err)
 			}
 
-			if diff {
-				if noHash {
-					if targetEntry.Size == sourceStat.Size() {
-						fmt.Printf("skip uploading file %s. The file already exists!\n", targetFilePath)
-						return nil
-					}
-				} else {
-					if targetEntry.Size == sourceStat.Size() {
-						if len(targetEntry.CheckSum) > 0 {
-							// compare hash
-							md5hash, err := commons.HashLocalFileMD5(sourcePath)
-							if err != nil {
-								return xerrors.Errorf("failed to get hash for %s: %w", sourcePath, err)
-							}
-
-							if md5hash == targetEntry.CheckSum {
-								fmt.Printf("skip uploading file %s. The file with the same hash already exists!\n", targetFilePath)
-								return nil
-							}
+			if force {
+				logger.Debugf("deleting existing file %s", targetFilePath)
+				err := filesystem.RemoveFile(targetFilePath, true)
+				if err != nil {
+					return xerrors.Errorf("failed to remove %s: %w", targetFilePath, err)
+				}
+			} else {
+				if targetEntry.Size == sourceStat.Size() {
+					if len(targetEntry.CheckSum) > 0 {
+						// compare hash
+						if md5hash == targetEntry.CheckSum {
+							fmt.Printf("skip uploading file %s. The file with the same hash already exists!\n", targetFilePath)
+							return nil
 						}
 					}
 				}
@@ -284,25 +342,6 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, sourcePath string
 				err := filesystem.RemoveFile(targetFilePath, true)
 				if err != nil {
 					return xerrors.Errorf("failed to remove %s: %w", targetFilePath, err)
-				}
-			} else if force {
-				logger.Debugf("deleting existing file %s", targetFilePath)
-				err := filesystem.RemoveFile(targetFilePath, true)
-				if err != nil {
-					return xerrors.Errorf("failed to remove %s: %w", targetFilePath, err)
-				}
-			} else {
-				// ask
-				overwrite := commons.InputYN(fmt.Sprintf("file %s already exists. Overwrite?", targetFilePath))
-				if overwrite {
-					logger.Debugf("deleting existing file %s", targetFilePath)
-					err := filesystem.RemoveFile(targetFilePath, true)
-					if err != nil {
-						return xerrors.Errorf("failed to remove %s: %w", targetFilePath, err)
-					}
-				} else {
-					fmt.Printf("skip uploading file %s. The file already exists!\n", targetFilePath)
-					return nil
 				}
 			}
 		}
@@ -328,7 +367,7 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, sourcePath string
 
 		for _, entryInDir := range entries {
 			newSourcePath := filepath.Join(sourcePath, entryInDir.Name())
-			err = submitOne(parallelJobManager, newSourcePath, targetDir, force, singleThreaded, diff, noHash)
+			err = submitOne(parallelJobManager, submitStatusFile, newSourcePath, targetDir, force, singleThreaded)
 			if err != nil {
 				return xerrors.Errorf("failed to perform put %s to %s: %w", newSourcePath, targetDir, err)
 			}

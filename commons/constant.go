@@ -37,4 +37,6 @@ const (
 
 	aesIV      string = "4e2f34041d564ed8"
 	aesPadding string = "671ff9e1f816451b"
+
+	mdRepoStatusFilename string = "MD_REPO_STATUS.json"
 )

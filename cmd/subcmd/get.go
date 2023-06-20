@@ -30,9 +30,8 @@ func AddGetCommand(rootCmd *cobra.Command) {
 	getCmd.Flags().BoolP("force", "f", false, "Get forcefully")
 	getCmd.Flags().Int("download_thread_num", commons.MaxParallelJobThreadNumDefault, "Specify the number of download threads")
 	getCmd.Flags().String("tcp_buffer_size", commons.TcpBufferSizeStringDefault, "Specify TCP socket buffer size")
-	getCmd.Flags().Bool("progress", false, "Display progress bar")
-	getCmd.Flags().Bool("diff", false, "Get files having different content")
-	getCmd.Flags().Bool("no_hash", false, "Compare files without using md5 hash")
+	getCmd.Flags().Bool("no_progress", false, "Do not display progress bar")
+
 	getCmd.Flags().Int("retry", 1, "Retry if fails")
 	getCmd.Flags().Int("retry_interval", 60, "Retry interval in seconds")
 
@@ -40,6 +39,11 @@ func AddGetCommand(rootCmd *cobra.Command) {
 }
 
 func processGetCommand(command *cobra.Command, args []string) error {
+	logger := log.WithFields(log.Fields{
+		"package":  "main",
+		"function": "processGetCommand",
+	})
+
 	cont, err := commons.ProcessCommonFlags(command)
 	if err != nil {
 		return xerrors.Errorf("failed to process common flags: %w", err)
@@ -84,30 +88,14 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		}
 	}
 
-	progress := false
-	progressFlag := command.Flags().Lookup("progress")
-	if progressFlag != nil {
-		progress, err = strconv.ParseBool(progressFlag.Value.String())
+	progress := true
+	noProgressFlag := command.Flags().Lookup("no_progress")
+	if noProgressFlag != nil {
+		noProgress, err := strconv.ParseBool(noProgressFlag.Value.String())
 		if err != nil {
-			progress = false
-		}
-	}
-
-	diff := false
-	diffFlag := command.Flags().Lookup("diff")
-	if diffFlag != nil {
-		diff, err = strconv.ParseBool(diffFlag.Value.String())
-		if err != nil {
-			diff = false
-		}
-	}
-
-	noHash := false
-	noHashFlag := command.Flags().Lookup("no_hash")
-	if noHashFlag != nil {
-		noHash, err = strconv.ParseBool(noHashFlag.Value.String())
-		if err != nil {
-			noHash = false
+			progress = true
+		} else {
+			progress = !noProgress
 		}
 	}
 
@@ -173,10 +161,14 @@ func processGetCommand(command *cobra.Command, args []string) error {
 
 	defer filesystem.Release()
 
+	// display
+	logger.Debugf("download iRODS ticket: %s", mdRepoTicket.IRODSTicket)
+	logger.Debugf("download path: %s", mdRepoTicket.IRODSDataPath)
+
 	parallelJobManager := commons.NewParallelJobManager(filesystem, downloadThreadNum, progress)
 	parallelJobManager.Start()
 
-	err = getOne(parallelJobManager, mdRepoTicket.IRODSDataPath, targetPath, force, diff, noHash)
+	err = getOne(parallelJobManager, mdRepoTicket.IRODSDataPath, targetPath, force)
 	if err != nil {
 		return xerrors.Errorf("failed to perform get %s to %s: %w", mdRepoTicket.IRODSDataPath, targetPath, err)
 	}
@@ -190,7 +182,7 @@ func processGetCommand(command *cobra.Command, args []string) error {
 	return nil
 }
 
-func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, targetPath string, force bool, diff bool, noHash bool) error {
+func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, targetPath string, force bool) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "main",
 		"function": "getOne",
@@ -242,25 +234,24 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 		}
 
 		if exist {
-			if diff {
-				if noHash {
-					if targetEntry.Size() == sourceEntry.Size {
-						fmt.Printf("skip downloading file %s. The file already exists!\n", targetFilePath)
-						return nil
-					}
-				} else {
-					if targetEntry.Size() == sourceEntry.Size {
-						if len(sourceEntry.CheckSum) > 0 {
-							// compare hash
-							md5hash, err := commons.HashLocalFileMD5(targetFilePath)
-							if err != nil {
-								return xerrors.Errorf("failed to get hash of %s: %w", targetFilePath, err)
-							}
+			if force {
+				logger.Debugf("deleting existing file %s", targetFilePath)
+				err := os.Remove(targetFilePath)
+				if err != nil {
+					return xerrors.Errorf("failed to remove %s: %w", targetFilePath, err)
+				}
+			} else {
+				if targetEntry.Size() == sourceEntry.Size {
+					if len(sourceEntry.CheckSum) > 0 {
+						// compare hash
+						md5hash, err := commons.HashLocalFileMD5(targetFilePath)
+						if err != nil {
+							return xerrors.Errorf("failed to get hash of %s: %w", targetFilePath, err)
+						}
 
-							if sourceEntry.CheckSum == md5hash {
-								fmt.Printf("skip downloading file %s. The file with the same hash already exists!\n", targetFilePath)
-								return nil
-							}
+						if sourceEntry.CheckSum == md5hash {
+							fmt.Printf("skip downloading file %s. The file with the same hash already exists!\n", targetFilePath)
+							return nil
 						}
 					}
 				}
@@ -269,25 +260,6 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 				err := os.Remove(targetFilePath)
 				if err != nil {
 					return xerrors.Errorf("failed to remove %s: %w", targetFilePath, err)
-				}
-			} else if force {
-				logger.Debugf("deleting existing file %s", targetFilePath)
-				err := os.Remove(targetFilePath)
-				if err != nil {
-					return xerrors.Errorf("failed to remove %s: %w", targetFilePath, err)
-				}
-			} else {
-				// ask
-				overwrite := commons.InputYN(fmt.Sprintf("file %s already exists. Overwrite?", targetFilePath))
-				if overwrite {
-					logger.Debugf("deleting existing file %s", targetFilePath)
-					err := os.Remove(targetFilePath)
-					if err != nil {
-						return xerrors.Errorf("failed to remove %s: %w", targetFilePath, err)
-					}
-				} else {
-					fmt.Printf("skip downloading file %s. The file already exists!\n", targetFilePath)
-					return nil
 				}
 			}
 		}
@@ -314,7 +286,7 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 		for idx := range entries {
 			path := entries[idx].Path
 
-			err = getOne(parallelJobManager, path, targetDir, force, diff, noHash)
+			err = getOne(parallelJobManager, path, targetDir, force)
 			if err != nil {
 				return xerrors.Errorf("failed to get %s to %s: %w", path, targetDir, err)
 			}

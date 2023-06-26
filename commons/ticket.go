@@ -1,6 +1,7 @@
 package commons
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
@@ -22,6 +23,14 @@ func padAesKey(key string) string {
 	return paddedKey[:16]
 }
 
+func padPkcs7(data []byte, blocksize int) []byte {
+	n := blocksize - (len(data) % blocksize)
+	pb := make([]byte, len(data)+n)
+	copy(pb, data)
+	copy(pb[len(data):], bytes.Repeat([]byte{byte(n)}, n))
+	return pb
+}
+
 func AesDecrypt(key string, data []byte) ([]byte, error) {
 	key = padAesKey(key)
 	block, err := aes.NewCipher([]byte(key))
@@ -30,12 +39,12 @@ func AesDecrypt(key string, data []byte) ([]byte, error) {
 	}
 
 	decrypter := cipher.NewCBCDecrypter(block, []byte(aesIV))
+	contentLength := binary.LittleEndian.Uint32(data[:4])
 
-	dest := make([]byte, len(data))
-	decrypter.CryptBlocks(dest, data)
+	dest := make([]byte, len(data[4:]))
+	decrypter.CryptBlocks(dest, data[4:])
 
-	dataLen := binary.LittleEndian.Uint32(dest[:4])
-	return dest[4 : 4+dataLen], nil
+	return dest[:contentLength], nil
 }
 
 func AesEncrypt(key string, data []byte) ([]byte, error) {
@@ -47,26 +56,15 @@ func AesEncrypt(key string, data []byte) ([]byte, error) {
 
 	encrypter := cipher.NewCBCEncrypter(block, []byte(aesIV))
 
-	blockSize := block.BlockSize()
+	contentLength := uint32(len(data))
+	padData := padPkcs7(data, block.BlockSize())
 
-	dataToWrite := len(data) + 4
-
-	numBlocks := dataToWrite / blockSize
-	if dataToWrite%blockSize != 0 {
-		numBlocks += 1
-	}
-
-	paddedSize := numBlocks * blockSize
-	paddedData := make([]byte, paddedSize)
+	dest := make([]byte, len(padData)+4)
 
 	// add size header
-	binary.LittleEndian.PutUint32(paddedData, uint32(len(data)))
-	// add data
-	copy(paddedData[4:], data)
+	binary.LittleEndian.PutUint32(dest, contentLength)
+	encrypter.CryptBlocks(dest[4:], padData)
 
-	dest := make([]byte, paddedSize)
-
-	encrypter.CryptBlocks(dest, paddedData)
 	return dest, nil
 }
 
@@ -82,7 +80,7 @@ func EncodeMDRepoTicket(ticket *MDRepoTicket, password string) (string, error) {
 		return "", xerrors.Errorf("failed to AES encode ticket string: %w", err)
 	}
 
-	ticketString := base64.RawStdEncoding.EncodeToString(rawTicket)
+	ticketString := base64.StdEncoding.EncodeToString(rawTicket)
 	return ticketString, nil
 }
 
@@ -114,7 +112,7 @@ func DecodeMDRepoTicket(ticket string, password string) (*MDRepoTicket, error) {
 		return nil, xerrors.Errorf("failed to MD5 hash password: %w", err)
 	}
 
-	rawTicket, err := base64.RawStdEncoding.DecodeString(ticket)
+	rawTicket, err := base64.StdEncoding.DecodeString(ticket)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to Base64 decode ticket string: %w", err)
 	}

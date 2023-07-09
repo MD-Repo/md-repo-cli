@@ -18,9 +18,10 @@ import (
 )
 
 var submitCmd = &cobra.Command{
-	Use:   "submit [mdrepo_ticket] [local data dir or file] ...",
-	Short: "Submit local data to MD-Repo",
-	RunE:  processSubmitCommand,
+	Use:     "submit [mdrepo_ticket] [local data dir or file] ...",
+	Short:   "Submit local data to MD-Repo",
+	Aliases: []string{"upload", "up"},
+	RunE:    processSubmitCommand,
 }
 
 func AddPutCommand(rootCmd *cobra.Command) {

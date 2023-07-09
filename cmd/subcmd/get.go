@@ -17,10 +17,11 @@ import (
 )
 
 var getCmd = &cobra.Command{
-	Use:   "get [mdrepo_ticket] [local dir]",
-	Short: "Download MD-Repo data to local dir",
-	Long:  `This downloads MD-Repo data to the given local dir.`,
-	RunE:  processGetCommand,
+	Use:     "get [mdrepo_ticket] [local dir]",
+	Short:   "Download MD-Repo data to local dir",
+	Aliases: []string{"download", "down"},
+	Long:    `This downloads MD-Repo data to the given local dir.`,
+	RunE:    processGetCommand,
 }
 
 func AddGetCommand(rootCmd *cobra.Command) {

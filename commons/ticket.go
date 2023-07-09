@@ -86,24 +86,51 @@ func EncodeMDRepoTicket(ticket *MDRepoTicket, password string) (string, error) {
 
 func GetMDRepoTicketFromPlainText(ticket string) (*MDRepoTicket, error) {
 	ticketParts := strings.Split(string(ticket), ":")
-	if len(ticketParts) == 0 {
+	if len(ticketParts) != 2 {
 		return nil, xerrors.Errorf("failed to parse ticket parts")
 	}
 
 	irodsTicket := ticketParts[0]
-	irodsDataPath := ""
-	if len(ticketParts) >= 2 {
-		irodsDataPath = ticketParts[1]
+	irodsDataPath := ticketParts[1]
+
+	if !isTicketString(irodsTicket) {
+		return nil, xerrors.Errorf("failed to parse iRODS ticket")
 	}
 
-	if len(irodsTicket) == 0 {
-		return nil, xerrors.Errorf("failed to parse iRODS ticket")
+	if !isPathString(irodsDataPath) {
+		return nil, xerrors.Errorf("failed to parse iRODS data path")
 	}
 
 	return &MDRepoTicket{
 		IRODSTicket:   irodsTicket,
 		IRODSDataPath: irodsDataPath,
 	}, nil
+}
+
+func isPathString(str string) bool {
+	if len(str) == 0 {
+		return false
+	}
+
+	if strings.HasPrefix(str, fmt.Sprintf("/%s/", mdRepoZone)) {
+		return true
+	}
+	return false
+}
+
+func isTicketString(str string) bool {
+	if len(str) == 0 {
+		return false
+	}
+
+	for _, s := range str {
+		sb := byte(s)
+		if sb < '!' || sb > '~' {
+			// non ascii
+			return false
+		}
+	}
+	return true
 }
 
 func DecodeMDRepoTicket(ticket string, password string) (*MDRepoTicket, error) {
@@ -114,12 +141,17 @@ func DecodeMDRepoTicket(ticket string, password string) (*MDRepoTicket, error) {
 
 	rawTicket, err := base64.StdEncoding.DecodeString(ticket)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to Base64 decode ticket string: %w", err)
+		return nil, xerrors.Errorf("failed to Base64 decode ticket string '%s': %w", ticket, err)
 	}
 
 	payload, err := AesDecrypt(hashedPassword, rawTicket)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to AES decode ticket string: %w", err)
+	}
+
+	ticketParts := strings.Split(string(payload), ":")
+	if len(ticketParts) != 2 {
+		return nil, xerrors.Errorf("failed to decode ticket string '%s'", ticket)
 	}
 
 	return GetMDRepoTicketFromPlainText(string(payload))

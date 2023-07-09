@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/MD-Repo/md-repo-cli/commons"
 	"github.com/cyverse/go-irodsclient/fs"
@@ -153,12 +154,14 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 		return xerrors.Errorf("not enough input arguments")
 	}
 
-	ticket := args[0]
+	ticket := strings.TrimSpace(args[0])
 	sourcePaths := args[1:]
+
+	log.Debugf("ticket string: %s", ticket)
 
 	mdRepoTicket, err := commons.GetConfig().GetMDRepoTicket(ticket)
 	if err != nil {
-		return xerrors.Errorf("failed to get MD-Repo Ticket: %w", err)
+		return xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
 	}
 
 	// Create a file system

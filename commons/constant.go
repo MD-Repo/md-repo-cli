@@ -16,19 +16,9 @@ const (
 
 	// iRODS configuration
 	// Prod
-	//mdRepoHost         string = "data.cyverse.org"
-	//mdRepoPort         int    = 1247
-	//mdRepoZone string = "iplant"
-	//mdRepoUser         string = "md-uploader"
-	//mdRepoUserPassword string = ""
-	//mdRepoHome string = "/" + mdRepoZone + "/home/md-dev"
-	//mdRepoLandingPath string = mdRepoHome + "/landing"
-	//mdRepoReleasePath string = mdRepoHome + "/release"
-
-	// Dev
-	mdRepoHost         string = "data-dev.cyverse.rocks"
+	mdRepoHost         string = "data.cyverse.org"
 	mdRepoPort         int    = 1247
-	mdRepoZone         string = "cyverse.dev"
+	mdRepoZone         string = "iplant"
 	mdRepoUser         string = "md-uploader"
 	mdRepoUserPassword string = ""
 	mdRepoHome         string = "/" + mdRepoZone + "/home/md-dev"

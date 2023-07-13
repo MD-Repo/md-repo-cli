@@ -40,9 +40,6 @@ func SetCommonFlags(command *cobra.Command) {
 
 	command.MarkFlagsMutuallyExclusive("debug", "version")
 	command.MarkFlagsMutuallyExclusive("log_level", "version")
-	command.MarkFlagsMutuallyExclusive("resource", "version")
-	command.MarkFlagsMutuallyExclusive("ticket", "version")
-	command.MarkFlagsMutuallyExclusive("session", "version")
 }
 
 func GetCommonFlagValues(command *cobra.Command) *CommonFlagValues {

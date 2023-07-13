@@ -9,7 +9,7 @@ const (
 	connectionTimeout time.Duration = 10 * time.Minute
 	filesystemTimeout time.Duration = 10 * time.Minute
 
-	UploadTreadNumDefault      int    = 5
+	TransferTreadNumDefault    int    = 5
 	UploadTreadNumMax          int    = 20
 	TcpBufferSizeDefault       int    = 4 * 1024 * 1024
 	TcpBufferSizeStringDefault string = "4MB"

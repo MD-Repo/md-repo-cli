@@ -3,8 +3,8 @@ package subcmd
 import (
 	"fmt"
 	"runtime"
-	"strconv"
 
+	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/commons"
 	"github.com/spf13/cobra"
 	"golang.org/x/xerrors"
@@ -15,19 +15,20 @@ var upgradeCmd = &cobra.Command{
 	Short: "Upgrade MD-Repo command-line tool to the latest version available",
 	Long:  `This upgrades MD-Repo command-line tool to the latest version available.`,
 	RunE:  processUpgradeCommand,
+	Args:  cobra.NoArgs,
 }
 
 func AddUpgradeCommand(rootCmd *cobra.Command) {
 	// attach common flags
-	commons.SetCommonFlags(upgradeCmd)
+	flag.SetCommonFlags(upgradeCmd)
 
-	upgradeCmd.Flags().Bool("check", false, "Check the latest version only")
+	flag.SetCheckVersionFlags(upgradeCmd)
 
 	rootCmd.AddCommand(upgradeCmd)
 }
 
 func processUpgradeCommand(command *cobra.Command, args []string) error {
-	cont, err := commons.ProcessCommonFlags(command)
+	cont, err := flag.ProcessCommonFlags(command)
 	if err != nil {
 		return xerrors.Errorf("failed to process common flags: %w", err)
 	}
@@ -36,16 +37,9 @@ func processUpgradeCommand(command *cobra.Command, args []string) error {
 		return nil
 	}
 
-	check := false
-	checkFlag := command.Flags().Lookup("check")
-	if checkFlag != nil {
-		check, err = strconv.ParseBool(checkFlag.Value.String())
-		if err != nil {
-			check = false
-		}
-	}
+	checkVersionFlagValues := flag.GetCheckVersionFlagValues()
 
-	if check {
+	if checkVersionFlagValues.Check {
 		err = checkNewVersion()
 		if err != nil {
 			return xerrors.Errorf("failed to check new release: %w", err)

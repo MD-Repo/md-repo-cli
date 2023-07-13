@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/cmd/subcmd"
-	"github.com/MD-Repo/md-repo-cli/commons"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -35,7 +35,7 @@ func processCommand(command *cobra.Command, args []string) error {
 		"function": "processCommand",
 	})
 
-	cont, err := commons.ProcessCommonFlags(command)
+	cont, err := flag.ProcessCommonFlags(command)
 	if err != nil {
 		logger.Errorf("%+v", err)
 	}
@@ -45,7 +45,7 @@ func processCommand(command *cobra.Command, args []string) error {
 	}
 
 	// if nothing is given
-	commons.PrintHelp(command)
+	command.Usage()
 
 	return nil
 }
@@ -64,7 +64,7 @@ func main() {
 	})
 
 	// attach common flags
-	commons.SetCommonFlags(rootCmd)
+	flag.SetCommonFlags(rootCmd)
 
 	// add sub commands
 	subcmd.AddGetCommand(rootCmd)

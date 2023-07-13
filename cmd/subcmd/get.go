@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_util "github.com/cyverse/go-irodsclient/irods/util"
 	"github.com/jedib0t/go-pretty/v6/progress"
 
+	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/commons"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -22,19 +22,17 @@ var getCmd = &cobra.Command{
 	Aliases: []string{"download", "down"},
 	Long:    `This downloads MD-Repo data to the given local dir.`,
 	RunE:    processGetCommand,
+	Args:    cobra.ExactArgs(2),
 }
 
 func AddGetCommand(rootCmd *cobra.Command) {
 	// attach common flags
-	commons.SetCommonFlags(getCmd)
+	flag.SetCommonFlags(getCmd)
 
-	getCmd.Flags().BoolP("force", "f", false, "Get forcefully")
-	getCmd.Flags().Int("download_thread_num", commons.MaxParallelJobThreadNumDefault, "Specify the number of download threads")
-	getCmd.Flags().String("tcp_buffer_size", commons.TcpBufferSizeStringDefault, "Specify TCP socket buffer size")
-	getCmd.Flags().Bool("no_progress", false, "Do not display progress bar")
-
-	getCmd.Flags().Int("retry", 1, "Retry if fails")
-	getCmd.Flags().Int("retry_interval", 60, "Retry interval in seconds")
+	flag.SetForceFlags(getCmd, false)
+	flag.SetParallelTransferFlags(getCmd, false)
+	flag.SetProgressFlags(getCmd)
+	flag.SetRetryFlags(getCmd)
 
 	rootCmd.AddCommand(getCmd)
 }
@@ -45,7 +43,7 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		"function": "processGetCommand",
 	})
 
-	cont, err := commons.ProcessCommonFlags(command)
+	cont, err := flag.ProcessCommonFlags(command)
 	if err != nil {
 		return xerrors.Errorf("failed to process common flags: %w", err)
 	}
@@ -60,85 +58,19 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		return xerrors.Errorf("failed to input missing fields: %w", err)
 	}
 
-	force := false
-	forceFlag := command.Flags().Lookup("force")
-	if forceFlag != nil {
-		force, err = strconv.ParseBool(forceFlag.Value.String())
+	forceFlagValues := flag.GetForceFlagValues()
+	parallelTransferFlagValues := flag.GetParallelTransferFlagValues()
+	progressFlagValues := flag.GetProgressFlagValues()
+	retryFlagValues := flag.GetRetryFlagValues()
+
+	maxConnectionNum := parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
+
+	if retryFlagValues.RetryNumber > 1 && !retryFlagValues.RetryChild {
+		err = commons.RunWithRetry(retryFlagValues.RetryNumber, retryFlagValues.RetryIntervalSeconds)
 		if err != nil {
-			force = false
-		}
-	}
-
-	downloadThreadNum := commons.MaxParallelJobThreadNumDefault
-	downloadThreadNumFlag := command.Flags().Lookup("download_thread_num")
-	if downloadThreadNumFlag != nil {
-		n, err := strconv.ParseInt(downloadThreadNumFlag.Value.String(), 10, 32)
-		if err == nil {
-			downloadThreadNum = int(n)
-		}
-	}
-
-	maxConnectionNum := downloadThreadNum + 2 // 2 for metadata op
-
-	tcpBufferSize := commons.TcpBufferSizeDefault
-	tcpBufferSizeFlag := command.Flags().Lookup("tcp_buffer_size")
-	if tcpBufferSizeFlag != nil {
-		n, err := commons.ParseSize(tcpBufferSizeFlag.Value.String())
-		if err == nil {
-			tcpBufferSize = int(n)
-		}
-	}
-
-	progress := true
-	noProgressFlag := command.Flags().Lookup("no_progress")
-	if noProgressFlag != nil {
-		noProgress, err := strconv.ParseBool(noProgressFlag.Value.String())
-		if err != nil {
-			progress = true
-		} else {
-			progress = !noProgress
-		}
-	}
-
-	retryChild := false
-	retryChildFlag := command.Flags().Lookup("retry_child")
-	if retryChildFlag != nil {
-		retryChildValue, err := strconv.ParseBool(retryChildFlag.Value.String())
-		if err != nil {
-			retryChildValue = false
-		}
-
-		retryChild = retryChildValue
-	}
-
-	retry := int64(1)
-	retryFlag := command.Flags().Lookup("retry")
-	if retryFlag != nil {
-		retry, err = strconv.ParseInt(retryFlag.Value.String(), 10, 32)
-		if err != nil {
-			retry = 1
-		}
-	}
-
-	retryInterval := int64(60)
-	retryIntervalFlag := command.Flags().Lookup("retry_interval")
-	if retryIntervalFlag != nil {
-		retryInterval, err = strconv.ParseInt(retryIntervalFlag.Value.String(), 10, 32)
-		if err != nil {
-			retryInterval = 60
-		}
-	}
-
-	if retry > 1 && !retryChild {
-		err = commons.RunWithRetry(int(retry), int(retryInterval))
-		if err != nil {
-			return err
+			return xerrors.Errorf("failed to run with retry %d: %w", retryFlagValues.RetryNumber, err)
 		}
 		return nil
-	}
-
-	if len(args) < 2 {
-		return xerrors.Errorf("not enough input arguments")
 	}
 
 	ticket := args[0]
@@ -146,7 +78,7 @@ func processGetCommand(command *cobra.Command, args []string) error {
 
 	mdRepoTicket, err := commons.GetConfig().GetMDRepoTicket(ticket)
 	if err != nil {
-		return xerrors.Errorf("failed to get MD-Repo Ticket: %w", err)
+		return xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
 	}
 
 	// Create a file system
@@ -155,7 +87,7 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		return xerrors.Errorf("failed to get iRODS Account: %w", err)
 	}
 
-	filesystem, err := commons.GetIRODSFSClientAdvanced(account, maxConnectionNum, tcpBufferSize)
+	filesystem, err := commons.GetIRODSFSClientAdvanced(account, maxConnectionNum, parallelTransferFlagValues.TCPBufferSize)
 	if err != nil {
 		return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
 	}
@@ -166,10 +98,10 @@ func processGetCommand(command *cobra.Command, args []string) error {
 	logger.Debugf("download iRODS ticket: %s", mdRepoTicket.IRODSTicket)
 	logger.Debugf("download path: %s", mdRepoTicket.IRODSDataPath)
 
-	parallelJobManager := commons.NewParallelJobManager(filesystem, downloadThreadNum, progress)
+	parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
 	parallelJobManager.Start()
 
-	err = getOne(parallelJobManager, mdRepoTicket.IRODSDataPath, targetPath, force)
+	err = getOne(parallelJobManager, mdRepoTicket.IRODSDataPath, targetPath, forceFlagValues.Force)
 	if err != nil {
 		return xerrors.Errorf("failed to perform get %s to %s: %w", mdRepoTicket.IRODSDataPath, targetPath, err)
 	}

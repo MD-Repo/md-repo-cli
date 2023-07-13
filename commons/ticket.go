@@ -152,15 +152,16 @@ func DecodeMDRepoTicket(ticket string, password string) (*MDRepoTicket, error) {
 		return nil, xerrors.Errorf("failed to Base64 decode ticket string '%s': %w", ticket, err)
 	}
 
-	logger.Debugf("decoded ticket string: '%v'", rawTicket)
 	payload, err := AesDecrypt(hashedPassword, rawTicket)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to AES decode ticket string: %w", err)
 	}
 
+	logger.Debugf("decoded ticket string: '%s'", payload)
+
 	ticketParts := strings.Split(string(payload), ":")
 	if len(ticketParts) != 2 {
-		return nil, xerrors.Errorf("failed to decode ticket string '%s'", ticket)
+		return nil, xerrors.Errorf("failed to decode ticket string '%s' ticket must have two parts", string(payload))
 	}
 
 	return GetMDRepoTicketFromPlainText(string(payload))

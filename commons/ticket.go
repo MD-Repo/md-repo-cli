@@ -87,18 +87,18 @@ func EncodeMDRepoTicket(ticket *MDRepoTicket, password string) (string, error) {
 func GetMDRepoTicketFromPlainText(ticket string) (*MDRepoTicket, error) {
 	ticketParts := strings.Split(string(ticket), ":")
 	if len(ticketParts) != 2 {
-		return nil, xerrors.Errorf("failed to parse ticket parts")
+		return nil, xerrors.Errorf("failed to parse ticket parts. must have two parts.")
 	}
 
 	irodsTicket := ticketParts[0]
 	irodsDataPath := ticketParts[1]
 
 	if !isTicketString(irodsTicket) {
-		return nil, xerrors.Errorf("failed to parse iRODS ticket")
+		return nil, xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid.", irodsTicket)
 	}
 
 	if !isPathString(irodsDataPath) {
-		return nil, xerrors.Errorf("failed to parse iRODS data path")
+		return nil, xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid.", irodsDataPath)
 	}
 
 	return &MDRepoTicket{

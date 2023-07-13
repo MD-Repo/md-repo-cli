@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/xerrors"
 )
 
@@ -134,16 +135,24 @@ func isTicketString(str string) bool {
 }
 
 func DecodeMDRepoTicket(ticket string, password string) (*MDRepoTicket, error) {
-	hashedPassword, err := HashStringMD5(password)
+	logger := log.WithFields(log.Fields{
+		"package":  "commons",
+		"function": "DecodeMDRepoTicket",
+	})
+
+	hashedPassword, err := HashStringPBKDF2SHA256(password)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to MD5 hash password: %w", err)
 	}
+
+	logger.Debugf("password hash string: '%s'", hashedPassword)
 
 	rawTicket, err := base64.StdEncoding.DecodeString(ticket)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to Base64 decode ticket string '%s': %w", ticket, err)
 	}
 
+	logger.Debugf("decoded ticket string: '%v'", rawTicket)
 	payload, err := AesDecrypt(hashedPassword, rawTicket)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to AES decode ticket string: %w", err)

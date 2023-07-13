@@ -3,6 +3,7 @@ module github.com/MD-Repo/md-repo-cli
 go 1.18
 
 require (
+	github.com/alexandrevicenzi/unchained v1.3.0
 	github.com/creativeprojects/go-selfupdate v1.1.0
 	github.com/cyverse/go-irodsclient v0.12.2
 	github.com/jedib0t/go-pretty/v6 v6.4.6

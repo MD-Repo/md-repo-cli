@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/alexandrevicenzi/unchained/pbkdf2"
 	"golang.org/x/xerrors"
 )
 
@@ -42,6 +43,10 @@ func HashStringMD5(str string) (string, error) {
 func HashStringsMD5(strs []string) (string, error) {
 	hashAlg := md5.New()
 	return HashStrings(strs, hashAlg)
+}
+
+func HashStringPBKDF2SHA256(str string) (string, error) {
+	return pbkdf2.NewPBKDF2SHA256Hasher().Encode(str, pbkdf2SHA256HasherSalt, pbkdf2SHA256HasherIterations)
 }
 
 func HashStrings(strs []string, hashAlg hash.Hash) (string, error) {

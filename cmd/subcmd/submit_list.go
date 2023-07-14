@@ -1,9 +1,13 @@
 package subcmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/commons"
@@ -71,21 +75,21 @@ func processSubmitListCommand(command *cobra.Command, args []string) error {
 
 	defer filesystem.Release()
 
+	targetPath := commons.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
+
 	// display
 	logger.Debugf("submission iRODS ticket: %s", mdRepoTicket.IRODSTicket)
-	logger.Debugf("submission path: %s", mdRepoTicket.IRODSDataPath)
+	logger.Debugf("submission path: %s", targetPath)
 
-	err = listOne(filesystem, mdRepoTicket.IRODSDataPath)
+	err = listOne(filesystem, targetPath, targetPath)
 	if err != nil {
-		return xerrors.Errorf("failed to list %s: %w", mdRepoTicket.IRODSDataPath, err)
+		return xerrors.Errorf("failed to list %s: %w", targetPath, err)
 	}
 
 	return nil
 }
 
-func listOne(fs *irodsclient_fs.FileSystem, targetPath string) error {
-	targetPath = commons.MakeIRODSLandingPath(targetPath)
-
+func listOne(fs *irodsclient_fs.FileSystem, targetRootPath string, targetPath string) error {
 	connection, err := fs.GetMetadataConnection()
 	if err != nil {
 		return xerrors.Errorf("failed to get connection: %w", err)
@@ -94,10 +98,7 @@ func listOne(fs *irodsclient_fs.FileSystem, targetPath string) error {
 
 	collection, err := irodsclient_irodsfs.GetCollection(connection, targetPath)
 	if err != nil {
-		if !irodsclient_types.IsFileNotFoundError(err) {
-			return xerrors.Errorf("failed to get collection %s: %w", targetPath, err)
-		}
-		return err
+		return xerrors.Errorf("failed to get collection %s: %w", targetPath, err)
 	}
 
 	colls, err := irodsclient_irodsfs.ListSubCollections(connection, targetPath)
@@ -110,10 +111,103 @@ func listOne(fs *irodsclient_fs.FileSystem, targetPath string) error {
 		return xerrors.Errorf("failed to list data-objects in %s: %w", targetPath, err)
 	}
 
-	fmt.Printf("  NAME\tOWNER\tSIZE\tCHECKSUM\tMOD_TIME\n")
+	// print text
+	fmt.Printf("[%s]\n", getDataPath(targetRootPath, targetPath))
+	printTextGridHead()
 	printDataObjects(objs)
 	printCollections(colls)
+
+	// call recursively
+	for _, coll := range colls {
+		fmt.Printf("\n")
+		err = listOne(fs, targetRootPath, coll.Path)
+		if err != nil {
+			return xerrors.Errorf("failed to list %s: %w", coll.Path, err)
+		}
+	}
+
+	if targetRootPath == targetPath {
+		for _, obj := range objs {
+			if obj.Name == commons.GetMDRepoStatusFilename() {
+				fmt.Printf("\n")
+				err = catStatusFile(fs, obj.Path)
+				if err != nil {
+					return xerrors.Errorf("failed to cat status file %s: %w", obj.Path, err)
+				}
+				break
+			}
+		}
+	}
+
 	return nil
+}
+
+func catStatusFile(fs *irodsclient_fs.FileSystem, targetPath string) error {
+	fh, err := fs.OpenFile(targetPath, "", "r")
+	if err != nil {
+		return xerrors.Errorf("failed to open file %s: %w", targetPath, err)
+	}
+
+	defer fh.Close()
+
+	fmt.Printf("[SUBMISSION STATUS INFO]\n")
+	jsonBytes, err := io.ReadAll(fh)
+	if err != nil {
+		return xerrors.Errorf("failed to read file %s: %w", targetPath, err)
+	}
+
+	jsonStr := getPrettyStatusFileJSON(jsonBytes)
+	fmt.Printf("%s\n\n", string(jsonStr))
+
+	return nil
+}
+
+func getPrettyStatusFileJSON(jsonBytes []byte) string {
+	logger := log.WithFields(log.Fields{
+		"package":  "main",
+		"function": "getPrettyStatusFileJSON",
+	})
+
+	prettyJson := string(jsonBytes)
+
+	status := commons.SubmitStatusFile{}
+	err := json.Unmarshal(jsonBytes, &status)
+	if err != nil {
+		xerr := xerrors.Errorf("failed to decode json: %w", err)
+		logger.Error(xerr)
+		return prettyJson
+	}
+
+	jsonStr, err := json.MarshalIndent(status, "", "    ")
+	if err != nil {
+		xerr := xerrors.Errorf("failed to marshal to json: %w", err)
+		logger.Error(xerr)
+		return prettyJson
+	}
+
+	prettyJson = string(jsonStr)
+	return prettyJson
+}
+
+func getDataPath(targetRootPath string, targetPath string) string {
+	rel, err := filepath.Rel(targetRootPath, targetPath)
+	if err != nil {
+		return targetPath
+	}
+
+	if rel == "." {
+		return "/"
+	}
+
+	if strings.HasPrefix(rel, "./") {
+		return rel[1:]
+	}
+
+	if rel[0] != '/' {
+		return fmt.Sprintf("/%s", rel)
+	}
+
+	return rel
 }
 
 func printDataObjects(entries []*irodsclient_types.IRODSDataObject) {
@@ -129,8 +223,7 @@ func printDataObjects(entries []*irodsclient_types.IRODSDataObject) {
 
 func printDataObject(entry *irodsclient_types.IRODSDataObject) {
 	for _, replica := range entry.Replicas {
-		modTime := commons.MakeDateTimeString(replica.ModifyTime)
-		fmt.Printf("  %s\t%s\t%d\t%s\t%s\n", entry.Name, replica.Owner, entry.Size, replica.CheckSum, modTime)
+		printTextGridRow(false, entry.Name, fmt.Sprintf("%d", entry.Size), replica.CheckSum, replica.ModifyTime)
 		break
 	}
 }
@@ -142,6 +235,25 @@ func printCollections(entries []*irodsclient_types.IRODSCollection) {
 	})
 
 	for _, entry := range entries {
-		fmt.Printf("  %s\t%s\t%d\t%s\t%s\n", entry.Name, entry.Owner, 0, "", entry.ModifyTime)
+		printTextGridRow(true, entry.Name, "-", "", entry.ModifyTime)
 	}
+}
+
+func printTextGridHead() {
+	printTextGridRowInternal("TYPE", "NAME", "SIZE", "CHECKSUM", "LAST_MODIFIED")
+}
+
+func printTextGridRow(isDir bool, name string, size string, checksum string, lastmodified time.Time) {
+	typeStr := "File"
+	if isDir {
+		typeStr = "Dir"
+	}
+
+	modTime := commons.MakeDateTimeString(lastmodified)
+	printTextGridRowInternal(typeStr, name, size, checksum, modTime)
+}
+
+func printTextGridRowInternal(typeStr string, name string, size string, checksum string, lastmodified string) {
+
+	fmt.Printf("%s\t%-50s\t%-12s\t%-32s\t%s\n", typeStr, name, size, checksum, lastmodified)
 }

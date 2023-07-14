@@ -21,9 +21,10 @@ const (
 	mdRepoZone         string = "iplant"
 	mdRepoUser         string = "md-uploader"
 	mdRepoUserPassword string = ""
-	mdRepoHome         string = "/" + mdRepoZone + "/home/md-dev"
-	mdRepoLandingPath  string = mdRepoHome + "/landing"
-	mdRepoReleasePath  string = mdRepoHome + "/release"
+
+	mdRepoHome        string = "/" + mdRepoZone + "/home/md-dev"
+	mdRepoLandingPath string = mdRepoHome + "/landing"
+	mdRepoReleasePath string = mdRepoHome + "/release"
 
 	aesIV                        string = "4e2f34041d564ed8"
 	aesPadding                   string = "671ff9e1f816451b"

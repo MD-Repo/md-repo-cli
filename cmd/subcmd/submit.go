@@ -95,16 +95,11 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 
 	defer filesystem.Release()
 
+	targetPath := commons.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
+
 	// display
 	logger.Debugf("submission iRODS ticket: %s", mdRepoTicket.IRODSTicket)
-	logger.Debugf("submission path: %s", mdRepoTicket.IRODSDataPath)
-
-	existingEntries, err := filesystem.List(mdRepoTicket.IRODSDataPath)
-	if err != nil {
-		return xerrors.Errorf("failed to list %s: %w", mdRepoTicket.IRODSDataPath, err)
-	}
-
-	logger.Debugf("found %d files in path %s", len(existingEntries), mdRepoTicket.IRODSDataPath)
+	logger.Debugf("submission path: %s", targetPath)
 
 	submitStatusFile := commons.NewSubmitStatusFile()
 
@@ -115,9 +110,12 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 		if len(sourcePaths) > 1 {
 			includeFirstDir = true
 		}
-		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, mdRepoTicket.IRODSDataPath, forceFlagValues.Force, parallelTransferFlagValues.SingleTread, includeFirstDir)
+
+		sourcePath = commons.MakeLocalPath(sourcePath)
+
+		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, targetPath, forceFlagValues.Force, parallelTransferFlagValues.SingleTread, includeFirstDir)
 		if err != nil {
-			return xerrors.Errorf("failed to submit %s to %s: %w", sourcePath, mdRepoTicket.IRODSDataPath, err)
+			return xerrors.Errorf("failed to submit %s to %s: %w", sourcePath, targetPath, err)
 		}
 	}
 
@@ -125,24 +123,24 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 
 	// status file
 	submitStatusFile.SetInProgress()
-	err = createSubmitStatusFile(filesystem, submitStatusFile, mdRepoTicket.IRODSDataPath)
+	err = createSubmitStatusFile(filesystem, submitStatusFile, targetPath)
 	if err != nil {
-		return xerrors.Errorf("failed to create status file on %s: %w", mdRepoTicket.IRODSDataPath, err)
+		return xerrors.Errorf("failed to create status file on %s: %w", targetPath, err)
 	}
 
 	parallelJobManager.Start()
 	err = parallelJobManager.Wait()
 	if err != nil {
 		submitStatusFile.SetErrored()
-		defer createSubmitStatusFile(filesystem, submitStatusFile, mdRepoTicket.IRODSDataPath)
+		defer createSubmitStatusFile(filesystem, submitStatusFile, targetPath)
 		return xerrors.Errorf("failed to perform parallel jobs: %w", err)
 	}
 
 	// status file
 	submitStatusFile.SetCompleted()
-	err = createSubmitStatusFile(filesystem, submitStatusFile, mdRepoTicket.IRODSDataPath)
+	err = createSubmitStatusFile(filesystem, submitStatusFile, targetPath)
 	if err != nil {
-		return xerrors.Errorf("failed to create status file on %s: %w", mdRepoTicket.IRODSDataPath, err)
+		return xerrors.Errorf("failed to create status file on %s: %w", targetPath, err)
 	}
 
 	return nil
@@ -154,7 +152,6 @@ func createSubmitStatusFile(filesystem *fs.FileSystem, submitStatusFile *commons
 		"function": "createStatusFile",
 	})
 
-	dataRootPath = commons.MakeIRODSLandingPath(dataRootPath)
 	statusFileName := commons.GetMDRepoStatusFilename()
 	statusFilePath := commons.MakeTargetIRODSFilePath(filesystem, statusFileName, dataRootPath)
 
@@ -194,9 +191,6 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 		"package":  "main",
 		"function": "submitOne",
 	})
-
-	sourcePath = commons.MakeLocalPath(sourcePath)
-	targetPath = commons.MakeIRODSLandingPath(targetPath)
 
 	filesystem := parallelJobManager.GetFilesystem()
 

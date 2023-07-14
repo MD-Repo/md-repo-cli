@@ -31,6 +31,11 @@ func SetDefaultConfigIfEmpty() {
 }
 
 func GetAccount(ticket *MDRepoTicket) (*irodsclient_types.IRODSAccount, error) {
+	ticketString := ""
+	if ticket != nil {
+		ticketString = ticket.IRODSTicket
+	}
+
 	return &irodsclient_types.IRODSAccount{
 		AuthenticationScheme:    irodsclient_types.AuthSchemeNative,
 		ClientServerNegotiation: false,
@@ -42,7 +47,7 @@ func GetAccount(ticket *MDRepoTicket) (*irodsclient_types.IRODSAccount, error) {
 		ProxyUser:               mdRepoUser,
 		ProxyZone:               mdRepoZone,
 		Password:                mdRepoUserPassword,
-		Ticket:                  ticket.IRODSTicket,
+		Ticket:                  ticketString,
 		DefaultResource:         "",
 		PamTTL:                  1,
 		SSLConfiguration:        nil,

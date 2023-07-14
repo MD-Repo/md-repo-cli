@@ -94,16 +94,19 @@ func processGetCommand(command *cobra.Command, args []string) error {
 
 	defer filesystem.Release()
 
+	sourcePath := commons.MakeIRODSReleasePath(mdRepoTicket.IRODSDataPath)
+	targetPath = commons.MakeLocalPath(targetPath)
+
 	// display
 	logger.Debugf("download iRODS ticket: %s", mdRepoTicket.IRODSTicket)
-	logger.Debugf("download path: %s", mdRepoTicket.IRODSDataPath)
+	logger.Debugf("download path: %s", sourcePath)
 
 	parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
 	parallelJobManager.Start()
 
-	err = getOne(parallelJobManager, mdRepoTicket.IRODSDataPath, targetPath, forceFlagValues.Force)
+	err = getOne(parallelJobManager, sourcePath, targetPath, forceFlagValues.Force)
 	if err != nil {
-		return xerrors.Errorf("failed to perform get %s to %s: %w", mdRepoTicket.IRODSDataPath, targetPath, err)
+		return xerrors.Errorf("failed to perform get %s to %s: %w", sourcePath, targetPath, err)
 	}
 
 	parallelJobManager.DoneScheduling()
@@ -120,9 +123,6 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 		"package":  "main",
 		"function": "getOne",
 	})
-
-	sourcePath = commons.MakeIRODSReleasePath(sourcePath)
-	targetPath = commons.MakeLocalPath(targetPath)
 
 	filesystem := parallelJobManager.GetFilesystem()
 

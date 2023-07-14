@@ -69,6 +69,7 @@ func main() {
 	// add sub commands
 	subcmd.AddGetCommand(rootCmd)
 	subcmd.AddPutCommand(rootCmd)
+	subcmd.AddPutListCommand(rootCmd)
 	subcmd.AddUpgradeCommand(rootCmd)
 
 	err := Execute()

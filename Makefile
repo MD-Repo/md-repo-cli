@@ -1,5 +1,5 @@
 PKG=github.com/MD-Repo/md-repo-cli
-VERSION=v$(shell cat VERSION.txt)
+VERSION=$(shell cat VERSION.txt)
 GIT_COMMIT?=$(shell git rev-parse HEAD)
 BUILD_DATE?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS?="-X '${PKG}/commons.clientVersion=${VERSION}' -X '${PKG}/commons.gitCommit=${GIT_COMMIT}' -X '${PKG}/commons.buildDate=${BUILD_DATE}'"

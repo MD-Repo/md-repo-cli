@@ -61,7 +61,7 @@ func InputMissingFields() (bool, error) {
 	if !appConfig.NoPassword {
 		password := appConfig.Password
 		for len(password) == 0 {
-			fmt.Print("MDRepo User Password: ")
+			fmt.Print("Password: ")
 			bytePassword, err := term.ReadPassword(int(syscall.Stdin))
 			if err != nil {
 				return false, xerrors.Errorf("failed to read password: %w", err)

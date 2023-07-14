@@ -173,9 +173,16 @@ func createSubmitStatusFile(filesystem *fs.FileSystem, submitStatusFile *commons
 
 	logger.Debugf("creating status file to %s", statusFilePath)
 
+	if filesystem.ExistsFile(statusFilePath) {
+		err = filesystem.RemoveFile(statusFilePath, true)
+		if err != nil {
+			return xerrors.Errorf("failed to delete stale submit status file %s: %w", statusFilePath, err)
+		}
+	}
+
 	err = filesystem.UploadFile(localTempFile, statusFilePath, "", false, nil)
 	if err != nil {
-		return xerrors.Errorf("failed to create submit status file to %s: %w", statusFilePath, err)
+		return xerrors.Errorf("failed to create submit status file %s: %w", statusFilePath, err)
 	}
 
 	os.Remove(localTempFile)

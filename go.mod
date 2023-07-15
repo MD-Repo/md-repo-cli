@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/alexandrevicenzi/unchained v1.3.0
 	github.com/creativeprojects/go-selfupdate v1.1.0
-	github.com/cyverse/go-irodsclient v0.12.6
+	github.com/cyverse/go-irodsclient v0.12.7-0.20230714233653-3fbef93a9554
 	github.com/jedib0t/go-pretty/v6 v6.4.6
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.5.0

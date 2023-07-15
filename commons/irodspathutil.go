@@ -103,7 +103,7 @@ func StatIRODSPath(filesystem *irodsclient_fs.FileSystem, irodsPath string) (*ir
 		return entry, nil
 	}
 
-	return nil, irodsclient_types.NewFileNotFoundError("could not find a file or a directory")
+	return nil, xerrors.Errorf("failed to find the file or the directory for path %s: %w", irodsPath, irodsclient_types.NewFileNotFoundError())
 }
 
 func ExistsIRODSFile(filesystem *irodsclient_fs.FileSystem, irodsPath string) bool {

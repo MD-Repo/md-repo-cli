@@ -104,7 +104,7 @@ func processGetCommand(command *cobra.Command, args []string) error {
 	parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
 	parallelJobManager.Start()
 
-	err = getOne(parallelJobManager, sourcePath, targetPath, forceFlagValues.Force)
+	err = getDataset(parallelJobManager, sourcePath, targetPath, forceFlagValues.Force)
 	if err != nil {
 		return xerrors.Errorf("failed to perform get %s to %s: %w", sourcePath, targetPath, err)
 	}
@@ -115,6 +115,48 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		return xerrors.Errorf("failed to perform parallel jobs: %w", err)
 	}
 
+	return nil
+}
+
+func getDataset(parallelJobManager *commons.ParallelJobManager, sourcePath string, targetPath string, force bool) error {
+	logger := log.WithFields(log.Fields{
+		"package":  "main",
+		"function": "getDataset",
+	})
+
+	filesystem := parallelJobManager.GetFilesystem()
+
+	sourceEntry, err := commons.StatIRODSPath(filesystem, sourcePath)
+	if err != nil {
+		return xerrors.Errorf("failed to stat %s: %w", sourcePath, err)
+	}
+
+	if sourceEntry.Type == irodsclient_fs.FileEntry {
+		return getOne(parallelJobManager, sourcePath, targetPath, force)
+	} else {
+		// dir
+		logger.Debugf("downloading dir %s to %s", sourcePath, targetPath)
+
+		entries, err := commons.ListIRODSDir(filesystem, sourceEntry.Path)
+		if err != nil {
+			return xerrors.Errorf("failed to list dir %s: %w", sourceEntry.Path, err)
+		}
+
+		// make target dir
+		err = os.MkdirAll(targetPath, 0766)
+		if err != nil {
+			return xerrors.Errorf("failed to make dir %s: %w", targetPath, err)
+		}
+
+		for idx := range entries {
+			path := entries[idx].Path
+
+			err = getOne(parallelJobManager, path, targetPath, force)
+			if err != nil {
+				return xerrors.Errorf("failed to get %s to %s: %w", path, targetPath, err)
+			}
+		}
+	}
 	return nil
 }
 

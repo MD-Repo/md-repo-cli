@@ -89,6 +89,25 @@ func EncodeMDRepoTicket(ticket *MDRepoTicket, password string) (string, error) {
 	return ticketString, nil
 }
 
+func ValidateMDRepoTicket(ticket string) error {
+	ticketParts := strings.Split(string(ticket), ":")
+	if len(ticketParts) != 2 {
+		return xerrors.Errorf("failed to parse ticket parts. must have two parts.")
+	}
+
+	irodsTicket := ticketParts[0]
+	irodsDataPath := ticketParts[1]
+
+	if !isTicketString(irodsTicket) {
+		return xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid.", irodsTicket)
+	}
+
+	if !isPathString(irodsDataPath) {
+		return xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid.", irodsDataPath)
+	}
+	return nil
+}
+
 func GetMDRepoTicketFromPlainText(ticket string) (*MDRepoTicket, error) {
 	ticketParts := strings.Split(string(ticket), ":")
 	if len(ticketParts) != 2 {
@@ -171,9 +190,10 @@ func DecodeMDRepoTicket(ticket string, password string) (*MDRepoTicket, error) {
 
 	logger.Debugf("decoded ticket string: '%s'", payload)
 
-	ticketParts := strings.Split(string(payload), ":")
-	if len(ticketParts) != 2 {
-		return nil, xerrors.Errorf("failed to decode ticket string '%s' ticket must have two parts: %w", string(payload), WrongPasswordError)
+	err = ValidateMDRepoTicket(string(payload))
+	if err != nil {
+		logger.Error(err)
+		return nil, xerrors.Errorf("failed to decode ticket string '%s': %w", string(payload), WrongPasswordError)
 	}
 
 	return GetMDRepoTicketFromPlainText(string(payload))

@@ -8,6 +8,7 @@ import (
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/cmd/subcmd"
 	"github.com/MD-Repo/md-repo-cli/commons"
+	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -78,8 +79,14 @@ func main() {
 	if err != nil {
 		logger.Errorf("%+v", err)
 
-		if errors.Is(err, commons.WrongPasswordError) {
+		if irodsclient_types.IsConnectionConfigError(err) || irodsclient_types.IsConnectionError(err) {
+			fmt.Fprintf(os.Stderr, "Failed to establish a connection to MD-Repo data server!\n")
+		} else if irodsclient_types.IsAuthError(err) {
+			fmt.Fprintf(os.Stderr, "Auth failed!\n")
+		} else if errors.Is(err, commons.WrongPasswordError) {
 			fmt.Fprintf(os.Stderr, "Wrong Password!\n")
+		} else if errors.Is(err, commons.InvalidTicketError) {
+			fmt.Fprintf(os.Stderr, "Invalid ticket string!\n")
 		} else {
 			fmt.Fprintf(os.Stderr, "Error: %s\nError Trace:\n  - %+v\n", err.Error(), err)
 		}

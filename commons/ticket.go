@@ -15,6 +15,7 @@ import (
 
 var (
 	WrongPasswordError error = xerrors.Errorf("wrong password")
+	InvalidTicketError error = xerrors.Errorf("invalid ticket string")
 )
 
 type MDRepoTicket struct {
@@ -92,18 +93,18 @@ func EncodeMDRepoTicket(ticket *MDRepoTicket, password string) (string, error) {
 func ValidateMDRepoTicket(ticket string) error {
 	ticketParts := strings.Split(string(ticket), ":")
 	if len(ticketParts) != 2 {
-		return xerrors.Errorf("failed to parse ticket parts. must have two parts.")
+		return xerrors.Errorf("failed to parse ticket parts. must have two parts: %w", InvalidTicketError)
 	}
 
 	irodsTicket := ticketParts[0]
 	irodsDataPath := ticketParts[1]
 
 	if !isTicketString(irodsTicket) {
-		return xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid.", irodsTicket)
+		return xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid: %w", irodsTicket, InvalidTicketError)
 	}
 
 	if !isPathString(irodsDataPath) {
-		return xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid.", irodsDataPath)
+		return xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid: %w", irodsDataPath, InvalidTicketError)
 	}
 	return nil
 }
@@ -111,18 +112,18 @@ func ValidateMDRepoTicket(ticket string) error {
 func GetMDRepoTicketFromPlainText(ticket string) (*MDRepoTicket, error) {
 	ticketParts := strings.Split(string(ticket), ":")
 	if len(ticketParts) != 2 {
-		return nil, xerrors.Errorf("failed to parse ticket parts. must have two parts.")
+		return nil, xerrors.Errorf("failed to parse ticket parts. must have two parts: %w", InvalidTicketError)
 	}
 
 	irodsTicket := ticketParts[0]
 	irodsDataPath := ticketParts[1]
 
 	if !isTicketString(irodsTicket) {
-		return nil, xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid.", irodsTicket)
+		return nil, xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid: %w", irodsTicket, InvalidTicketError)
 	}
 
 	if !isPathString(irodsDataPath) {
-		return nil, xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid.", irodsDataPath)
+		return nil, xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid: %w", irodsDataPath, InvalidTicketError)
 	}
 
 	return &MDRepoTicket{

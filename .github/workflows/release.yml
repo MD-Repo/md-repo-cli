@@ -26,7 +26,7 @@ jobs:
     - name: "set build date"
       run: echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
     - uses: actions/checkout@v3
-    - uses: wangyoucao577/go-release-action@v1.31
+    - uses: wangyoucao577/go-release-action@v1.38
       with:
         github_token: ${{ secrets.RELEASE_GITHUB_TOKEN }}
         goversion: 1.18

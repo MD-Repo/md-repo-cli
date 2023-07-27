@@ -1,11 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/cmd/subcmd"
+	"github.com/MD-Repo/md-repo-cli/commons"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -76,7 +78,11 @@ func main() {
 	if err != nil {
 		logger.Errorf("%+v", err)
 
-		fmt.Fprintf(os.Stderr, "Error: %s\nError Trace:\n  - %+v\n", err.Error(), err)
+		if errors.Is(err, commons.WrongPasswordError) {
+			fmt.Fprintf(os.Stderr, "Wrong Password!\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %s\nError Trace:\n  - %+v\n", err.Error(), err)
+		}
 
 		os.Exit(1)
 	}

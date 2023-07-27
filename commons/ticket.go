@@ -13,6 +13,10 @@ import (
 	"golang.org/x/xerrors"
 )
 
+var (
+	WrongPasswordError error = xerrors.Errorf("wrong password")
+)
+
 type MDRepoTicket struct {
 	IRODSTicket   string
 	IRODSDataPath string
@@ -140,19 +144,27 @@ func DecodeMDRepoTicket(ticket string, password string) (*MDRepoTicket, error) {
 		"function": "DecodeMDRepoTicket",
 	})
 
+	logger.Infof("decoding ticket '%s' with password '%s'", ticket, password)
+
 	hashedPassword, err := HashStringPBKDF2SHA256(password)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to MD5 hash password: %w", err)
 	}
 
 	logger.Debugf("password hash string: '%s'", hashedPassword)
+	hashedPasswordParts := strings.Split(hashedPassword, "$")
+	hash := hashedPassword
+	if len(hashedPasswordParts) >= 4 {
+		hash = hashedPasswordParts[3]
+	}
+	logger.Debugf("actual password hash string: '%s'", hash)
 
 	rawTicket, err := base64.StdEncoding.DecodeString(ticket)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to Base64 decode ticket string '%s': %w", ticket, err)
 	}
 
-	payload, err := AesDecrypt(hashedPassword, rawTicket)
+	payload, err := AesDecrypt(hash, rawTicket)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to AES decode ticket string: %w", err)
 	}
@@ -161,7 +173,7 @@ func DecodeMDRepoTicket(ticket string, password string) (*MDRepoTicket, error) {
 
 	ticketParts := strings.Split(string(payload), ":")
 	if len(ticketParts) != 2 {
-		return nil, xerrors.Errorf("failed to decode ticket string '%s' ticket must have two parts", string(payload))
+		return nil, xerrors.Errorf("failed to decode ticket string '%s' ticket must have two parts: %w", string(payload), WrongPasswordError)
 	}
 
 	return GetMDRepoTicketFromPlainText(string(payload))

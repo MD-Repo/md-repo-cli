@@ -18,13 +18,13 @@ func GetDefaultConfig() *Config {
 	}
 }
 
-func (config *Config) GetMDRepoTicket(ticket string) (*MDRepoTicket, error) {
+func (config *Config) GetMDRepoTickets(ticket string) ([]MDRepoTicket, error) {
 	if config.NoPassword {
 		// plaintext ticket string
-		return GetMDRepoTicketFromPlainText(ticket)
+		return GetMDRepoTicketsFromPlainText(ticket)
 	}
 
-	return DecodeMDRepoTicket(ticket, config.Password)
+	return DecodeMDRepoTickets(ticket, config.Password)
 }
 
 func (config *Config) ToConfigTypeIn() *ConfigTypeIn {

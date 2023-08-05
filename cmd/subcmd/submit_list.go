@@ -55,15 +55,19 @@ func processSubmitListCommand(command *cobra.Command, args []string) error {
 		return xerrors.Errorf("failed to input missing fields: %w", err)
 	}
 
-	ticket := strings.TrimSpace(args[0])
+	ticketString := strings.TrimSpace(args[0])
 
-	mdRepoTicket, err := commons.GetConfig().GetMDRepoTicket(ticket)
+	mdRepoTickets, err := commons.GetConfig().GetMDRepoTickets(ticketString)
 	if err != nil {
 		return xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
 	}
 
+	if len(mdRepoTickets) == 0 {
+		return xerrors.Errorf("failed to parse MD-Repo Ticket. No ticket is provided")
+	}
+
 	// Create a file system
-	account, err := commons.GetAccount(mdRepoTicket)
+	account, err := commons.GetAccount(&mdRepoTickets[0])
 	if err != nil {
 		return xerrors.Errorf("failed to get iRODS Account: %w", err)
 	}
@@ -75,10 +79,10 @@ func processSubmitListCommand(command *cobra.Command, args []string) error {
 
 	defer filesystem.Release()
 
-	targetPath := commons.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
+	targetPath := commons.MakeIRODSLandingPath(mdRepoTickets[0].IRODSDataPath)
 
 	// display
-	logger.Debugf("submission iRODS ticket: %s", mdRepoTicket.IRODSTicket)
+	logger.Debugf("submission iRODS ticket: %s", mdRepoTickets[0].IRODSTicket)
 	logger.Debugf("submission path: %s", targetPath)
 
 	err = listOne(filesystem, targetPath, targetPath)

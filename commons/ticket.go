@@ -74,14 +74,35 @@ func AesEncrypt(key string, data []byte) ([]byte, error) {
 	return dest, nil
 }
 
-func EncodeMDRepoTicket(ticket *MDRepoTicket, password string) (string, error) {
-	hashedPassword, err := HashStringMD5(password)
+func EncodeMDRepoTickets(tickets []MDRepoTicket, password string) (string, error) {
+	logger := log.WithFields(log.Fields{
+		"package":  "commons",
+		"function": "EncodeMDRepoTickets",
+	})
+
+	hashedPassword, err := HashStringPBKDF2SHA256(password)
 	if err != nil {
 		return "", xerrors.Errorf("failed to MD5 hash password: %w", err)
 	}
 
-	payload := fmt.Sprintf("%s:%s", ticket.IRODSTicket, ticket.IRODSDataPath)
-	rawTicket, err := AesEncrypt(hashedPassword, []byte(payload))
+	logger.Debugf("password hash string: '%s'", hashedPassword)
+	hashedPasswordParts := strings.Split(hashedPassword, "$")
+	hash := hashedPassword
+	if len(hashedPasswordParts) >= 4 {
+		hash = hashedPasswordParts[3]
+	}
+	logger.Debugf("actual password hash string: '%s'", hash)
+
+	sb := strings.Builder{}
+	for _, ticket := range tickets {
+		if sb.Len() != 0 {
+			sb.WriteString(";")
+		}
+		sb.WriteString(fmt.Sprintf("%s:%s", ticket.IRODSTicket, ticket.IRODSDataPath))
+	}
+
+	payload := sb.String()
+	rawTicket, err := AesEncrypt(hash, []byte(payload))
 	if err != nil {
 		return "", xerrors.Errorf("failed to AES encode ticket string: %w", err)
 	}
@@ -90,46 +111,75 @@ func EncodeMDRepoTicket(ticket *MDRepoTicket, password string) (string, error) {
 	return ticketString, nil
 }
 
-func ValidateMDRepoTicket(ticket string) error {
-	ticketParts := strings.Split(string(ticket), ":")
-	if len(ticketParts) != 2 {
-		return xerrors.Errorf("failed to parse ticket parts. must have two parts: %w", InvalidTicketError)
+func ValidateMDRepoTicket(ticketString string) error {
+	tickets := strings.Split(ticketString, ";")
+	if len(tickets) < 1 {
+		return xerrors.Errorf("failed to parse tickets: %w", InvalidTicketError)
 	}
 
-	irodsTicket := ticketParts[0]
-	irodsDataPath := ticketParts[1]
+	for _, ticket := range tickets {
+		fmt.Printf("ticket: %s\n", ticket)
 
-	if !isTicketString(irodsTicket) {
-		return xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid: %w", irodsTicket, InvalidTicketError)
+		ticketParts := strings.Split(string(ticket), ":")
+		if len(ticketParts) != 2 {
+			return xerrors.Errorf("failed to parse ticket parts. must have two parts: %w", InvalidTicketError)
+		}
+
+		irodsTicket := ticketParts[0]
+		irodsDataPath := ticketParts[1]
+
+		if !isTicketString(irodsTicket) {
+			return xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid: %w", irodsTicket, InvalidTicketError)
+		}
+
+		if !isPathString(irodsDataPath) {
+			return xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid: %w", irodsDataPath, InvalidTicketError)
+		}
 	}
 
-	if !isPathString(irodsDataPath) {
-		return xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid: %w", irodsDataPath, InvalidTicketError)
-	}
 	return nil
 }
 
-func GetMDRepoTicketFromPlainText(ticket string) (*MDRepoTicket, error) {
+func GetMDRepoTicketFromPlainText(ticket string) (MDRepoTicket, error) {
 	ticketParts := strings.Split(string(ticket), ":")
 	if len(ticketParts) != 2 {
-		return nil, xerrors.Errorf("failed to parse ticket parts. must have two parts: %w", InvalidTicketError)
+		return MDRepoTicket{}, xerrors.Errorf("failed to parse ticket parts. must have two parts: %w", InvalidTicketError)
 	}
 
 	irodsTicket := ticketParts[0]
 	irodsDataPath := ticketParts[1]
 
 	if !isTicketString(irodsTicket) {
-		return nil, xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid: %w", irodsTicket, InvalidTicketError)
+		return MDRepoTicket{}, xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid: %w", irodsTicket, InvalidTicketError)
 	}
 
 	if !isPathString(irodsDataPath) {
-		return nil, xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid: %w", irodsDataPath, InvalidTicketError)
+		return MDRepoTicket{}, xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid: %w", irodsDataPath, InvalidTicketError)
 	}
 
-	return &MDRepoTicket{
+	return MDRepoTicket{
 		IRODSTicket:   irodsTicket,
 		IRODSDataPath: irodsDataPath,
 	}, nil
+}
+
+func GetMDRepoTicketsFromPlainText(ticketString string) ([]MDRepoTicket, error) {
+	tickets := strings.Split(ticketString, ";")
+	if len(tickets) < 1 {
+		return nil, xerrors.Errorf("failed to parse tickets: %w", InvalidTicketError)
+	}
+
+	mdRepoTickets := []MDRepoTicket{}
+	for _, ticket := range tickets {
+		mdRepoTicket, err := GetMDRepoTicketFromPlainText(ticket)
+		if err != nil {
+			return nil, err
+		}
+
+		mdRepoTickets = append(mdRepoTickets, mdRepoTicket)
+	}
+
+	return mdRepoTickets, nil
 }
 
 func isPathString(str string) bool {
@@ -158,13 +208,13 @@ func isTicketString(str string) bool {
 	return true
 }
 
-func DecodeMDRepoTicket(ticket string, password string) (*MDRepoTicket, error) {
+func DecodeMDRepoTickets(tickets string, password string) ([]MDRepoTicket, error) {
 	logger := log.WithFields(log.Fields{
 		"package":  "commons",
-		"function": "DecodeMDRepoTicket",
+		"function": "DecodeMDRepoTickets",
 	})
 
-	logger.Infof("decoding ticket '%s' with password '%s'", ticket, password)
+	logger.Infof("decoding tickets '%s' with password '%s'", tickets, password)
 
 	hashedPassword, err := HashStringPBKDF2SHA256(password)
 	if err != nil {
@@ -179,9 +229,9 @@ func DecodeMDRepoTicket(ticket string, password string) (*MDRepoTicket, error) {
 	}
 	logger.Debugf("actual password hash string: '%s'", hash)
 
-	rawTicket, err := base64.StdEncoding.DecodeString(ticket)
+	rawTicket, err := base64.StdEncoding.DecodeString(tickets)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to Base64 decode ticket string '%s': %w", ticket, err)
+		return nil, xerrors.Errorf("failed to Base64 decode ticket string '%s': %w", tickets, err)
 	}
 
 	payload, err := AesDecrypt(hash, rawTicket)
@@ -197,5 +247,5 @@ func DecodeMDRepoTicket(ticket string, password string) (*MDRepoTicket, error) {
 		return nil, xerrors.Errorf("failed to decode ticket string '%s': %w", string(payload), WrongPasswordError)
 	}
 
-	return GetMDRepoTicketFromPlainText(string(payload))
+	return GetMDRepoTicketsFromPlainText(string(payload))
 }

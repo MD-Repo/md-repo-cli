@@ -8,11 +8,12 @@ import (
 
 func TestTicket(t *testing.T) {
 	t.Run("test AES", testAES)
-	t.Run("test Ticket", testTicket)
+	t.Run("test SingleTicket", testSingleTicket)
+	t.Run("test MultiTickets", testMultiTickets)
 }
 
 func testAES(t *testing.T) {
-	data := "ticketstr123abc902#2134:/iplant/home/iychoi/data123"
+	data := "ticketstr123abc902#2134:/iplant/home/iychoi/data123;ticketstr345efv932#2424:/iplant/home/iychoi/data345"
 	key := "aes_key1234"
 
 	encrypted, err := AesEncrypt(key, []byte(data))
@@ -24,7 +25,7 @@ func testAES(t *testing.T) {
 	assert.Equal(t, string(data), string(decrypted))
 }
 
-func testTicket(t *testing.T) {
+func testSingleTicket(t *testing.T) {
 	irodsTicket := "ticketstr123abc902#2134"
 	irodsDataPath := "/iplant/home/iychoi/data123"
 	key := "aes_key1234"
@@ -34,12 +35,40 @@ func testTicket(t *testing.T) {
 		IRODSDataPath: irodsDataPath,
 	}
 
-	mdrepoTicket, err := EncodeMDRepoTicket(&ticket, key)
+	mdrepoTicketString, err := EncodeMDRepoTickets([]MDRepoTicket{ticket}, key)
 	assert.NoError(t, err)
 
-	decryptedTicket, err := DecodeMDRepoTicket(mdrepoTicket, key)
+	decryptedMDRepoTicket, err := DecodeMDRepoTickets(mdrepoTicketString, key)
 	assert.NoError(t, err)
 
-	assert.Equal(t, ticket.IRODSTicket, decryptedTicket.IRODSTicket)
-	assert.Equal(t, ticket.IRODSDataPath, decryptedTicket.IRODSDataPath)
+	assert.Len(t, decryptedMDRepoTicket, 1)
+	assert.Equal(t, ticket, decryptedMDRepoTicket[0])
+}
+
+func testMultiTickets(t *testing.T) {
+	irodsTicket1 := "ticketstr123abc902#2134"
+	irodsDataPath1 := "/iplant/home/iychoi/data123"
+	irodsTicket2 := "ticketstr345efv932#2424"
+	irodsDataPath2 := "/iplant/home/iychoi/data345"
+	key := "aes_key1234"
+
+	tickets := []MDRepoTicket{
+		{
+			IRODSTicket:   irodsTicket1,
+			IRODSDataPath: irodsDataPath1,
+		},
+		{
+			IRODSTicket:   irodsTicket2,
+			IRODSDataPath: irodsDataPath2,
+		},
+	}
+
+	mdrepoTicketString, err := EncodeMDRepoTickets(tickets, key)
+	assert.NoError(t, err)
+
+	decryptedMDRepoTicket, err := DecodeMDRepoTickets(mdrepoTicketString, key)
+	assert.NoError(t, err)
+
+	assert.Len(t, decryptedMDRepoTicket, 2)
+	assert.Equal(t, tickets, decryptedMDRepoTicket)
 }

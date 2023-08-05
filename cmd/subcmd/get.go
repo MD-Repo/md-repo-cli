@@ -73,48 +73,56 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		return nil
 	}
 
-	ticket := args[0]
+	ticketString := args[0]
 	targetPath := args[1]
 
-	mdRepoTicket, err := commons.GetConfig().GetMDRepoTicket(ticket)
+	mdRepoTickets, err := commons.GetConfig().GetMDRepoTickets(ticketString)
 	if err != nil {
 		return xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
 	}
 
-	// Create a file system
-	account, err := commons.GetAccount(mdRepoTicket)
-	if err != nil {
-		return xerrors.Errorf("failed to get iRODS Account: %w", err)
+	if len(mdRepoTickets) == 0 {
+		return xerrors.Errorf("failed to parse MD-Repo Ticket. No ticket is provided")
 	}
 
-	filesystem, err := commons.GetIRODSFSClientAdvanced(account, maxConnectionNum, parallelTransferFlagValues.TCPBufferSize)
-	if err != nil {
-		return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
+	// we may further optimize this by run it parallel
+	for _, mdRepoTicket := range mdRepoTickets {
+		// Create a file system
+		account, err := commons.GetAccount(&mdRepoTicket)
+		if err != nil {
+			return xerrors.Errorf("failed to get iRODS Account: %w", err)
+		}
+
+		filesystem, err := commons.GetIRODSFSClientAdvanced(account, maxConnectionNum, parallelTransferFlagValues.TCPBufferSize)
+		if err != nil {
+			return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
+		}
+
+		sourcePath := commons.MakeIRODSReleasePath(mdRepoTicket.IRODSDataPath)
+		targetPath = commons.MakeLocalPath(targetPath)
+
+		// display
+		logger.Debugf("download iRODS ticket: %s", mdRepoTicket.IRODSTicket)
+		logger.Debugf("download path: %s", sourcePath)
+
+		parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
+		parallelJobManager.Start()
+
+		err = getDataset(parallelJobManager, sourcePath, targetPath, forceFlagValues.Force)
+		if err != nil {
+			filesystem.Release()
+			return xerrors.Errorf("failed to perform get %s to %s: %w", sourcePath, targetPath, err)
+		}
+
+		parallelJobManager.DoneScheduling()
+		err = parallelJobManager.Wait()
+		if err != nil {
+			filesystem.Release()
+			return xerrors.Errorf("failed to perform parallel jobs: %w", err)
+		}
+
+		filesystem.Release()
 	}
-
-	defer filesystem.Release()
-
-	sourcePath := commons.MakeIRODSReleasePath(mdRepoTicket.IRODSDataPath)
-	targetPath = commons.MakeLocalPath(targetPath)
-
-	// display
-	logger.Debugf("download iRODS ticket: %s", mdRepoTicket.IRODSTicket)
-	logger.Debugf("download path: %s", sourcePath)
-
-	parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
-	parallelJobManager.Start()
-
-	err = getDataset(parallelJobManager, sourcePath, targetPath, forceFlagValues.Force)
-	if err != nil {
-		return xerrors.Errorf("failed to perform get %s to %s: %w", sourcePath, targetPath, err)
-	}
-
-	parallelJobManager.DoneScheduling()
-	err = parallelJobManager.Wait()
-	if err != nil {
-		return xerrors.Errorf("failed to perform parallel jobs: %w", err)
-	}
-
 	return nil
 }
 

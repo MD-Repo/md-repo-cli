@@ -1,7 +1,6 @@
 package subcmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -127,7 +126,7 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 
 	// status file
 	submitStatusFile.SetInProgress()
-	err = createSubmitStatusFile(filesystem, submitStatusFile, targetPath)
+	err = submitStatusFile.CreateStatusFile(filesystem, targetPath)
 	if err != nil {
 		return xerrors.Errorf("failed to create status file on %s: %w", targetPath, err)
 	}
@@ -136,57 +135,17 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 	err = parallelJobManager.Wait()
 	if err != nil {
 		submitStatusFile.SetErrored()
-		defer createSubmitStatusFile(filesystem, submitStatusFile, targetPath)
+		defer submitStatusFile.CreateStatusFile(filesystem, targetPath)
 		return xerrors.Errorf("failed to perform parallel jobs: %w", err)
 	}
 
 	// status file
 	submitStatusFile.SetCompleted()
-	err = createSubmitStatusFile(filesystem, submitStatusFile, targetPath)
+	err = submitStatusFile.CreateStatusFile(filesystem, targetPath)
 	if err != nil {
 		return xerrors.Errorf("failed to create status file on %s: %w", targetPath, err)
 	}
 
-	return nil
-}
-
-func createSubmitStatusFile(filesystem *fs.FileSystem, submitStatusFile *commons.SubmitStatusFile, dataRootPath string) error {
-	logger := log.WithFields(log.Fields{
-		"package":  "main",
-		"function": "createStatusFile",
-	})
-
-	statusFileName := commons.GetMDRepoStatusFilename()
-	statusFilePath := commons.MakeTargetIRODSFilePath(filesystem, statusFileName, dataRootPath)
-
-	localTempFile := filepath.Join(os.TempDir(), statusFileName)
-
-	logger.Debugf("creating local status file to %s", localTempFile)
-	jsonBytes, err := json.Marshal(submitStatusFile)
-	if err != nil {
-		return xerrors.Errorf("failed to marshal submit status file to json: %w", err)
-	}
-
-	err = os.WriteFile(localTempFile, jsonBytes, 0666)
-	if err != nil {
-		return xerrors.Errorf("failed to write submit status file to local: %w", err)
-	}
-
-	logger.Debugf("creating status file to %s", statusFilePath)
-
-	if filesystem.ExistsFile(statusFilePath) {
-		err = filesystem.RemoveFile(statusFilePath, true)
-		if err != nil {
-			return xerrors.Errorf("failed to delete stale submit status file %s: %w", statusFilePath, err)
-		}
-	}
-
-	err = filesystem.UploadFile(localTempFile, statusFilePath, "", false, nil)
-	if err != nil {
-		return xerrors.Errorf("failed to create submit status file %s: %w", statusFilePath, err)
-	}
-
-	os.Remove(localTempFile)
 	return nil
 }
 

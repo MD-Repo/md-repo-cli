@@ -132,7 +132,7 @@ func listOne(fs *irodsclient_fs.FileSystem, targetRootPath string, targetPath st
 
 	if targetRootPath == targetPath {
 		for _, obj := range objs {
-			if obj.Name == commons.GetMDRepoStatusFilename() {
+			if commons.IsStatusFile(obj.Name) {
 				fmt.Printf("\n")
 				err = catStatusFile(fs, obj.Path)
 				if err != nil {

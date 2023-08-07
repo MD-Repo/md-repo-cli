@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/cyverse/go-irodsclient/fs"
+	"golang.org/x/xerrors"
 )
 
 type SubmitStatus string
 
 const (
-	SubmitStatusUnknown    SubmitStatus = ""
+	SubmitStatusUnknown    SubmitStatus = "unknown"
 	SubmitStatusInProgress SubmitStatus = "inprogress"
 	SubmitStatusErrored    SubmitStatus = "errored"
 	SubmitStatusCompleted  SubmitStatus = "completed"
@@ -32,7 +35,7 @@ func (s *SubmitStatus) UnmarshalJSON(b []byte) error {
 
 	// Validate and convert the value.
 	switch strings.ToLower(ss) {
-	case "":
+	case "", string(SubmitStatusUnknown):
 		*s = SubmitStatusUnknown
 	case string(SubmitStatusInProgress):
 		*s = SubmitStatusInProgress
@@ -81,12 +84,71 @@ func (s *SubmitStatusFile) AddFile(f SubmitStatusEntry) {
 	s.Files = append(s.Files, f)
 }
 
+func getAllAvailableStatusFilenames() []string {
+	status := []SubmitStatus{SubmitStatusUnknown, SubmitStatusInProgress, SubmitStatusErrored, SubmitStatusCompleted}
+	names := []string{}
+
+	for _, st := range status {
+		names = append(names, getStatusFilename(st))
+	}
+
+	return names
+}
+
+func (s *SubmitStatusFile) GetStatusFilename() string {
+	return getStatusFilename(s.Status)
+}
+
+func getStatusFilename(status SubmitStatus) string {
+	return fmt.Sprintf(submissionStatusFilename, status)
+}
+
+func (s *SubmitStatusFile) CreateStatusFile(filesystem *fs.FileSystem, dataRootPath string) error {
+	statusFileName := s.GetStatusFilename()
+	statusFilePath := MakeTargetIRODSFilePath(filesystem, statusFileName, dataRootPath)
+
+	jsonBytes, err := json.Marshal(s)
+	if err != nil {
+		return xerrors.Errorf("failed to marshal submit status file to json: %w", err)
+	}
+
+	// remove old status files
+	existingDirEntries, err := filesystem.List(dataRootPath)
+	if err != nil {
+		return xerrors.Errorf("failed to list target directory: %w", err)
+	}
+
+	for _, existingDirEntry := range existingDirEntries {
+		if IsStatusFile(existingDirEntry.Name) {
+			err = filesystem.RemoveFile(existingDirEntry.Path, true)
+			if err != nil {
+				return xerrors.Errorf("failed to delete stale submit status file %s: %w", existingDirEntry.Path, err)
+			}
+		}
+	}
+
+	// upload
+	err = filesystem.UploadFileFromBuffer(jsonBytes, statusFilePath, "", false, nil)
+	if err != nil {
+		return xerrors.Errorf("failed to create submit status file %s: %w", statusFilePath, err)
+	}
+
+	return nil
+}
+
+func IsStatusFile(filename string) bool {
+	availableStatusFilenames := getAllAvailableStatusFilenames()
+	for _, availableStatusFilename := range availableStatusFilenames {
+		if filename == availableStatusFilename {
+			return true
+		}
+	}
+
+	return false
+}
+
 type SubmitStatusEntry struct {
 	IRODSPath string `json:"irods_path"`
 	Size      int64  `json:"size"`
 	MD5Hash   string `json:"md5_hash"`
-}
-
-func GetMDRepoStatusFilename() string {
-	return mdRepoStatusFilename
 }

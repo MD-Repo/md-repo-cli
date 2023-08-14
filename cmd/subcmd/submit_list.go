@@ -1,9 +1,9 @@
 package subcmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -147,22 +147,17 @@ func listOne(fs *irodsclient_fs.FileSystem, targetRootPath string, targetPath st
 }
 
 func catStatusFile(fs *irodsclient_fs.FileSystem, targetPath string) error {
-	fh, err := fs.OpenFile(targetPath, "", "r")
-	if err != nil {
-		return xerrors.Errorf("failed to open file %s: %w", targetPath, err)
-	}
+	buffer := bytes.Buffer{}
 
-	defer fh.Close()
+	err := fs.DownloadFileToBuffer(targetPath, "", buffer, nil)
+	if err != nil {
+		return xerrors.Errorf("failed to download file %s: %w", targetPath, err)
+	}
 
 	fmt.Printf("[SUBMISSION STATUS INFO]\n")
-	jsonBytes, err := io.ReadAll(fh)
-	if err != nil {
-		return xerrors.Errorf("failed to read file %s: %w", targetPath, err)
-	}
 
-	jsonStr := getPrettyStatusFileJSON(jsonBytes)
+	jsonStr := getPrettyStatusFileJSON(buffer.Bytes())
 	fmt.Printf("%s\n\n", string(jsonStr))
-
 	return nil
 }
 

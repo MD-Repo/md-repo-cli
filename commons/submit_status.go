@@ -1,6 +1,7 @@
 package commons
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -128,7 +129,13 @@ func (s *SubmitStatusFile) CreateStatusFile(filesystem *fs.FileSystem, dataRootP
 	}
 
 	// upload
-	err = filesystem.UploadFileFromBuffer(jsonBytes, statusFilePath, "", false, nil)
+	jsonBytesBuffer := bytes.Buffer{}
+	_, err = jsonBytesBuffer.Write(jsonBytes)
+	if err != nil {
+		return xerrors.Errorf("failed to write submit status to buffer: %w", err)
+	}
+
+	err = filesystem.UploadFileFromBuffer(jsonBytesBuffer, statusFilePath, "", false, nil)
 	if err != nil {
 		return xerrors.Errorf("failed to create submit status file %s: %w", statusFilePath, err)
 	}

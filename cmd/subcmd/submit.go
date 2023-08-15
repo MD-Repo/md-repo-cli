@@ -18,7 +18,7 @@ import (
 )
 
 var submitCmd = &cobra.Command{
-	Use:     "submit [mdrepo_ticket] [local data dir or file] ...",
+	Use:     "submit [mdrepo_ticket] [data dirs] ...",
 	Short:   "Submit local data to MD-Repo",
 	Aliases: []string{"upload", "up", "put"},
 	RunE:    processSubmitCommand,
@@ -35,6 +35,95 @@ func AddPutCommand(rootCmd *cobra.Command) {
 	flag.SetRetryFlags(submitCmd)
 
 	rootCmd.AddCommand(submitCmd)
+}
+
+// inputSubmissionFields inputs submission fields
+func inputSubmissionFields(flagValues *flag.SubmissionFlagValues, sourcePaths []string) error {
+	if flagValues.ExpectedSimulations <= 0 {
+		fmt.Print("The number of simulations in the submission: ")
+		fmt.Scanln(&flagValues.ExpectedSimulations)
+	}
+
+	numSimulations := len(sourcePaths)
+	if flagValues.ExpectedSimulations != numSimulations {
+		fmt.Printf("Error! We found %d simulations, but %d simulations are expected\n", numSimulations, flagValues.ExpectedSimulations)
+
+		fmt.Printf("The simulations we found are:\n")
+		for _, sourcePath := range sourcePaths {
+			fmt.Printf("> %s\n", sourcePath)
+		}
+
+		return xerrors.Errorf("The number of simulations typed (%d) does not match the number of simulations we found (%d)", flagValues.ExpectedSimulations, numSimulations)
+	}
+
+	return nil
+}
+
+func checkValidSourcePath(sourcePath string) error {
+	st, err := os.Stat(sourcePath)
+	if err != nil {
+		return xerrors.Errorf("failed to stat source %s: %w", sourcePath, err)
+	}
+
+	if !st.IsDir() {
+		return xerrors.Errorf("source %s must be a directory", sourcePath)
+	}
+
+	// check if source path has metadata in it
+	metadataPath := filepath.Join(sourcePath, commons.SubmissionMetadataFilename)
+	metadataStat, err := os.Stat(metadataPath)
+	if err == nil {
+		if !metadataStat.IsDir() && metadataStat.Size() > 0 {
+			// found
+			return nil
+		}
+		return xerrors.Errorf("invalid metadata file %s", metadataPath)
+	}
+
+	// metadata path not exist?
+	return xerrors.Errorf("invalid metadata dir %s", sourcePath)
+}
+
+// scanSourcePaths scans source paths and return valid sources only
+func scanSourcePaths(sourcePaths []string) ([]string, error) {
+	validSourcePaths := []string{}
+
+	for _, sourcePath := range sourcePaths {
+		sourcePath = commons.MakeLocalPath(sourcePath)
+
+		err := checkValidSourcePath(sourcePath)
+		if err == nil {
+			// valid
+			validSourcePaths = append(validSourcePaths, sourcePath)
+			continue
+		}
+
+		// may have sub dirs?
+		st, stErr := os.Stat(sourcePath)
+		if stErr != nil {
+			return nil, err
+		}
+
+		if !st.IsDir() {
+			return nil, err
+		}
+
+		dirEntries, readErr := os.ReadDir(sourcePath)
+		if readErr != nil {
+			return nil, xerrors.Errorf("failed to list source %s: %w", sourcePath, readErr)
+		}
+
+		for _, dirEntry := range dirEntries {
+			entryPath := filepath.Join(sourcePath, dirEntry.Name())
+			chkErr := checkValidSourcePath(entryPath)
+			if chkErr == nil {
+				// valid
+				validSourcePaths = append(validSourcePaths, entryPath)
+			}
+		}
+	}
+
+	return validSourcePaths, nil
 }
 
 func processSubmitCommand(command *cobra.Command, args []string) error {
@@ -62,8 +151,23 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 	parallelTransferFlagValues := flag.GetParallelTransferFlagValues()
 	progressFlagValues := flag.GetProgressFlagValues()
 	retryFlagValues := flag.GetRetryFlagValues()
+	submissionFlagValues := flag.GetSubmissionFlagValues()
 
-	maxConnectionNum := parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
+	ticketString := strings.TrimSpace(args[0])
+	sourcePaths := args[1:]
+
+	sourcePaths, err = scanSourcePaths(sourcePaths)
+	if err != nil {
+		return xerrors.Errorf("failed to scan source paths: %w", err)
+	}
+
+	if !retryFlagValues.RetryChild {
+		// only parent has input
+		err = inputSubmissionFields(submissionFlagValues, sourcePaths)
+		if err != nil {
+			return xerrors.Errorf("failed to input submission fields: %w", err)
+		}
+	}
 
 	if retryFlagValues.RetryNumber > 1 && !retryFlagValues.RetryChild {
 		err = commons.RunWithRetry(retryFlagValues.RetryNumber, retryFlagValues.RetryIntervalSeconds)
@@ -72,9 +176,6 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 		}
 		return nil
 	}
-
-	ticketString := strings.TrimSpace(args[0])
-	sourcePaths := args[1:]
 
 	mdRepoTickets, err := commons.GetConfig().GetMDRepoTickets(ticketString)
 	if err != nil {
@@ -90,6 +191,8 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 	if err != nil {
 		return xerrors.Errorf("failed to get iRODS Account: %w", err)
 	}
+
+	maxConnectionNum := parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
 
 	filesystem, err := commons.GetIRODSFSClientAdvanced(account, maxConnectionNum, parallelTransferFlagValues.TCPBufferSize)
 	if err != nil {
@@ -109,14 +212,9 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 	parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
 
 	for _, sourcePath := range sourcePaths {
-		includeFirstDir := false
-		if len(sourcePaths) > 1 {
-			includeFirstDir = true
-		}
+		logger.Debugf("submitting %s", sourcePath)
 
-		sourcePath = commons.MakeLocalPath(sourcePath)
-
-		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, targetPath, forceFlagValues.Force, parallelTransferFlagValues.SingleTread, includeFirstDir)
+		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, targetPath, targetPath, forceFlagValues.Force, parallelTransferFlagValues.SingleTread, true)
 		if err != nil {
 			return xerrors.Errorf("failed to submit %s to %s: %w", sourcePath, targetPath, err)
 		}
@@ -149,7 +247,7 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 	return nil
 }
 
-func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile *commons.SubmitStatusFile, sourcePath string, targetPath string, force bool, singleThreaded bool, includeFirstDir bool) error {
+func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile *commons.SubmitStatusFile, sourcePath string, targetRootPath string, targetPath string, force bool, singleThreaded bool, includeFirstDir bool) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "main",
 		"function": "submitOne",
@@ -199,8 +297,13 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 			return xerrors.Errorf("failed to get hash for %s: %w", sourcePath, err)
 		}
 
+		targetFileRelPath := targetFilePath
+		if strings.HasPrefix(targetFilePath, fmt.Sprintf("%s/", targetRootPath)) {
+			targetFileRelPath = targetFilePath[len(targetRootPath)+1:]
+		}
+
 		submitStatusEntry := commons.SubmitStatusEntry{
-			IRODSPath: targetFilePath,
+			IRODSPath: targetFileRelPath, // store relative path
 			Size:      sourceStat.Size(),
 			MD5Hash:   md5hash,
 		}
@@ -261,7 +364,7 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 
 		for _, entryInDir := range entries {
 			newSourcePath := filepath.Join(sourcePath, entryInDir.Name())
-			err = submitOne(parallelJobManager, submitStatusFile, newSourcePath, targetDir, force, singleThreaded, true)
+			err = submitOne(parallelJobManager, submitStatusFile, newSourcePath, targetRootPath, targetDir, force, singleThreaded, true)
 			if err != nil {
 				return xerrors.Errorf("failed to perform put %s to %s: %w", newSourcePath, targetDir, err)
 			}

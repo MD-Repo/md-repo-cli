@@ -31,5 +31,6 @@ const (
 	pbkdf2SHA256HasherSalt       string = "8675309"
 	pbkdf2SHA256HasherIterations int    = 260000
 
-	submissionStatusFilename string = "mdrepo-submission.%s.json"
+	submissionStatusFilename   string = "mdrepo-submission.%s.json"
+	SubmissionMetadataFilename string = "mdrepo-metadata.toml"
 )

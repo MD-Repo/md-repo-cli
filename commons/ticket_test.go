@@ -42,7 +42,7 @@ func testDecodeTicket1(t *testing.T) {
 	mdrepoTicketString := "bAAAABlJ/tQ16tgo3e2dvsnV/USMDg5tmSrtxIiaiWJb5mt1TkDadJ+E3JYBArgW47uK3Dwtwlf+JujrmsT2cGAaPXOc/IiGHvMDPMe7M5+voWO040QEQhtQM40j1XrhAES7uv2U6mZAwyl30ZPJvl77XZU="
 	key := "duetbobakthem"
 
-	decryptedMDRepoTicket, err := DecodeMDRepoTickets(mdrepoTicketString, key, nil)
+	decryptedMDRepoTicket, err := DecodeMDRepoTickets(mdrepoTicketString, key)
 	assert.NoError(t, err)
 
 	assert.GreaterOrEqual(t, len(decryptedMDRepoTicket), 1)
@@ -52,7 +52,7 @@ func testDecodeTicket2(t *testing.T) {
 	mdrepoTicketString := "bwAAAPqbphAPISAHe6Zfj0JT8bMDvPI4ElRQy1OpkWQS8IHWZFzNOrqkBWEG1mJz2K0UJhk3SxHlBKLMRdoyplWsNCuP39zRM+eM86S773497LG0z6nyRgNCU5loxrraSHmoiuRKG62tPRUHDWqJtDX6BD4="
 	key := "catgutBiascowing"
 
-	decryptedMDRepoTicket, err := DecodeMDRepoTickets(mdrepoTicketString, key, nil)
+	decryptedMDRepoTicket, err := DecodeMDRepoTickets(mdrepoTicketString, key)
 	assert.NoError(t, err)
 
 	assert.GreaterOrEqual(t, len(decryptedMDRepoTicket), 1)
@@ -71,7 +71,7 @@ func testSingleTicket(t *testing.T) {
 	mdrepoTicketString, err := EncodeMDRepoTickets([]MDRepoTicket{ticket}, key)
 	assert.NoError(t, err)
 
-	decryptedMDRepoTicket, err := DecodeMDRepoTickets(mdrepoTicketString, key, nil)
+	decryptedMDRepoTicket, err := DecodeMDRepoTickets(mdrepoTicketString, key)
 	assert.NoError(t, err)
 
 	assert.Len(t, decryptedMDRepoTicket, 1)
@@ -99,7 +99,7 @@ func testMultiTickets(t *testing.T) {
 	mdrepoTicketString, err := EncodeMDRepoTickets(tickets, key)
 	assert.NoError(t, err)
 
-	decryptedMDRepoTicket, err := DecodeMDRepoTickets(mdrepoTicketString, key, nil)
+	decryptedMDRepoTicket, err := DecodeMDRepoTickets(mdrepoTicketString, key)
 	assert.NoError(t, err)
 
 	assert.Len(t, decryptedMDRepoTicket, 2)

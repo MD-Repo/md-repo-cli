@@ -7,12 +7,12 @@ import (
 )
 
 func TestTicket(t *testing.T) {
-	//t.Run("test PasswordHash", testPasswordHash)
-	//t.Run("test AES", testAES)
-	//t.Run("test DecodeTicket1", testDecodeTicket1)
-	t.Run("test DecodeTicket2", testDecodeTicket2)
-	//t.Run("test SingleTicket", testSingleTicket)
-	//t.Run("test MultiTickets", testMultiTickets)
+	t.Run("test PasswordHash", testPasswordHash)
+	t.Run("test AES", testAES)
+	t.Run("test DecodeTicket1", testDecodeTicket1)
+	//t.Run("test DecodeTicket2", testDecodeTicket2)
+	t.Run("test SingleTicket", testSingleTicket)
+	t.Run("test MultiTickets", testMultiTickets)
 }
 
 func testPasswordHash(t *testing.T) {

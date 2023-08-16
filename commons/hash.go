@@ -2,12 +2,15 @@ package commons
 
 import (
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"hash"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/alexandrevicenzi/unchained/pbkdf2"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/xerrors"
 )
 
@@ -45,8 +48,30 @@ func HashStringsMD5(strs []string) (string, error) {
 	return HashStrings(strs, hashAlg)
 }
 
+func HashStringSHA256(str string) (string, error) {
+	hashAlg := sha256.New()
+	return HashStrings([]string{str}, hashAlg)
+}
+
 func HashStringPBKDF2SHA256(str string) (string, error) {
-	return pbkdf2.NewPBKDF2SHA256Hasher().Encode(str, pbkdf2SHA256HasherSalt, pbkdf2SHA256HasherIterations)
+	logger := log.WithFields(log.Fields{
+		"package":  "commons",
+		"function": "HashStringPBKDF2SHA256",
+	})
+
+	hashString, err := pbkdf2.NewPBKDF2SHA256Hasher().Encode(str, pbkdf2SHA256HasherSalt, pbkdf2SHA256HasherIterations)
+	if err != nil {
+		return hashString, err
+	}
+
+	logger.Debugf("pbkdf2-sha256 hash info string: '%s'", hashString)
+	hashedParts := strings.Split(hashString, "$")
+	hash := hashString
+	if len(hashedParts) >= 4 {
+		hash = hashedParts[3]
+	}
+
+	return hash, nil
 }
 
 func HashStrings(strs []string, hashAlg hash.Hash) (string, error) {

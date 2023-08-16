@@ -25,7 +25,7 @@ var submitCmd = &cobra.Command{
 	Args:    cobra.MinimumNArgs(2),
 }
 
-func AddPutCommand(rootCmd *cobra.Command) {
+func AddSubmitCommand(rootCmd *cobra.Command) {
 	// attach common flags
 	flag.SetCommonFlags(submitCmd)
 

@@ -234,12 +234,15 @@ func DecodeMDRepoTickets(tickets string, password string) ([]MDRepoTicket, error
 		return nil, xerrors.Errorf("failed to Base64 decode ticket string '%s': %w", tickets, err)
 	}
 
+	logger.Debugf("raw encrypted ticket data (in hex): '%x'\n", rawTicket)
+
 	payload, err := AesDecrypt(hash, rawTicket)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to AES decode ticket string: %w", err)
 	}
 
-	logger.Infof("decoded ticket string: '%s'", payload)
+	logger.Debugf("decoded ticket data (in hex): '%x'", payload)
+	logger.Debugf("decoded ticket data (in string): '%s'", payload)
 
 	err = ValidateMDRepoTicket(string(payload))
 	if err != nil {

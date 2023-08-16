@@ -22,12 +22,12 @@ import (
 var submitListCmd = &cobra.Command{
 	Use:     "submitls [mdrepo_ticket]",
 	Short:   "List MD-Repo submission data",
-	Aliases: []string{"submit_ls"},
+	Aliases: []string{"submit_ls", "list_submission", "list_submit"},
 	RunE:    processSubmitListCommand,
 	Args:    cobra.ExactArgs(1),
 }
 
-func AddPutListCommand(rootCmd *cobra.Command) {
+func AddSubmitListCommand(rootCmd *cobra.Command) {
 	// attach common flags
 	flag.SetCommonFlags(submitListCmd)
 
@@ -117,9 +117,9 @@ func listOne(fs *irodsclient_fs.FileSystem, targetRootPath string, targetPath st
 
 	// print text
 	fmt.Printf("[%s]\n", getDataPath(targetRootPath, targetPath))
-	printTextGridHead()
-	printDataObjects(objs)
-	printCollections(colls)
+	printSubmitListTextGridHead()
+	printSubmitListDataObjects(objs)
+	printSubmitListCollections(colls)
 
 	// call recursively
 	for _, coll := range colls {
@@ -209,50 +209,50 @@ func getDataPath(targetRootPath string, targetPath string) string {
 	return rel
 }
 
-func printDataObjects(entries []*irodsclient_types.IRODSDataObject) {
+func printSubmitListDataObjects(entries []*irodsclient_types.IRODSDataObject) {
 	// sort by name
 	sort.SliceStable(entries, func(i int, j int) bool {
 		return entries[i].Name < entries[j].Name
 	})
 
 	for _, entry := range entries {
-		printDataObject(entry)
+		printSubmitListDataObject(entry)
 	}
 }
 
-func printDataObject(entry *irodsclient_types.IRODSDataObject) {
+func printSubmitListDataObject(entry *irodsclient_types.IRODSDataObject) {
 	for _, replica := range entry.Replicas {
-		printTextGridRow(false, entry.Name, fmt.Sprintf("%d", entry.Size), replica.CheckSum, replica.ModifyTime)
+		printSubmitListTextGridRow(false, entry.Name, fmt.Sprintf("%d", entry.Size), replica.CheckSum, replica.ModifyTime)
 		break
 	}
 }
 
-func printCollections(entries []*irodsclient_types.IRODSCollection) {
+func printSubmitListCollections(entries []*irodsclient_types.IRODSCollection) {
 	// sort by name
 	sort.SliceStable(entries, func(i int, j int) bool {
 		return entries[i].Name < entries[j].Name
 	})
 
 	for _, entry := range entries {
-		printTextGridRow(true, entry.Name, "-", "", entry.ModifyTime)
+		printSubmitListTextGridRow(true, entry.Name, "-", "", entry.ModifyTime)
 	}
 }
 
-func printTextGridHead() {
-	printTextGridRowInternal("TYPE", "NAME", "SIZE", "CHECKSUM", "LAST_MODIFIED")
+func printSubmitListTextGridHead() {
+	printSubmitListTextGridRowInternal("TYPE", "NAME", "SIZE", "CHECKSUM", "LAST_MODIFIED")
 }
 
-func printTextGridRow(isDir bool, name string, size string, checksum string, lastmodified time.Time) {
+func printSubmitListTextGridRow(isDir bool, name string, size string, checksum string, lastmodified time.Time) {
 	typeStr := "File"
 	if isDir {
 		typeStr = "Dir"
 	}
 
 	modTime := commons.MakeDateTimeString(lastmodified)
-	printTextGridRowInternal(typeStr, name, size, checksum, modTime)
+	printSubmitListTextGridRowInternal(typeStr, name, size, checksum, modTime)
 }
 
-func printTextGridRowInternal(typeStr string, name string, size string, checksum string, lastmodified string) {
+func printSubmitListTextGridRowInternal(typeStr string, name string, size string, checksum string, lastmodified string) {
 
 	fmt.Printf("%s\t%-50s\t%-12s\t%-32s\t%s\n", typeStr, name, size, checksum, lastmodified)
 }

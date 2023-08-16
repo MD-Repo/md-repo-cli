@@ -44,8 +44,9 @@ func AesDecrypt(key string, data []byte) ([]byte, error) {
 		return nil, xerrors.Errorf("failed to create AES cipher: %w", err)
 	}
 
-	decrypter := cipher.NewCBCDecrypter(block, []byte(aesIV))
 	contentLength := binary.LittleEndian.Uint32(data[:4])
+
+	decrypter := cipher.NewCBCDecrypter(block, []byte(aesIV))
 
 	dest := make([]byte, len(data[4:]))
 	decrypter.CryptBlocks(dest, data[4:])
@@ -67,9 +68,10 @@ func AesEncrypt(key string, data []byte) ([]byte, error) {
 
 	dest := make([]byte, len(padData)+4)
 
+	encrypter.CryptBlocks(dest[4:], padData)
+
 	// add size header
 	binary.LittleEndian.PutUint32(dest, contentLength)
-	encrypter.CryptBlocks(dest[4:], padData)
 
 	return dest, nil
 }
@@ -212,7 +214,7 @@ func DecodeMDRepoTickets(tickets string, password string) ([]MDRepoTicket, error
 		"function": "DecodeMDRepoTickets",
 	})
 
-	logger.Infof("decoding tickets '%s' with password '%s'", tickets, password)
+	//logger.Infof("decoding tickets '%s' with password '%s'", tickets, password)
 
 	hashedPassword, err := HashStringPBKDF2SHA256(password)
 	if err != nil {
@@ -237,7 +239,7 @@ func DecodeMDRepoTickets(tickets string, password string) ([]MDRepoTicket, error
 		return nil, xerrors.Errorf("failed to AES decode ticket string: %w", err)
 	}
 
-	logger.Debugf("decoded ticket string: '%s'", payload)
+	logger.Infof("decoded ticket string: '%s'", payload)
 
 	err = ValidateMDRepoTicket(string(payload))
 	if err != nil {

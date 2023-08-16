@@ -118,8 +118,6 @@ func ValidateMDRepoTicket(ticketString string) error {
 	}
 
 	for _, ticket := range tickets {
-		fmt.Printf("ticket: %s\n", ticket)
-
 		ticketParts := strings.Split(string(ticket), ":")
 		if len(ticketParts) != 2 {
 			return xerrors.Errorf("failed to parse ticket parts. must have two parts: %w", InvalidTicketError)

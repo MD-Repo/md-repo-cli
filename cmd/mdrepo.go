@@ -83,9 +83,9 @@ func main() {
 		if irodsclient_types.IsConnectionConfigError(err) || irodsclient_types.IsConnectionError(err) {
 			fmt.Fprintf(os.Stderr, "Failed to establish a connection to MD-Repo data server!\n")
 		} else if irodsclient_types.IsAuthError(err) {
-			fmt.Fprintf(os.Stderr, "Auth failed!\n")
+			fmt.Fprintf(os.Stderr, "Authentication failed!\n")
 		} else if errors.Is(err, commons.WrongPasswordError) {
-			fmt.Fprintf(os.Stderr, "Wrong Password!\n")
+			fmt.Fprintf(os.Stderr, "Wrong ticket password!\n")
 		} else if errors.Is(err, commons.InvalidTicketError) {
 			fmt.Fprintf(os.Stderr, "Invalid ticket string!\n")
 		} else {

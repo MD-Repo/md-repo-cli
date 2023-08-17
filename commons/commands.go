@@ -61,7 +61,7 @@ func InputMissingFields() (bool, error) {
 	if !appConfig.NoPassword {
 		password := appConfig.Password
 		for len(password) == 0 {
-			fmt.Print("Password: ")
+			fmt.Print("Ticket password: ")
 			bytePassword, err := term.ReadPassword(int(syscall.Stdin))
 			if err != nil {
 				return false, xerrors.Errorf("failed to read password: %w", err)
@@ -71,7 +71,7 @@ func InputMissingFields() (bool, error) {
 			password = string(bytePassword)
 
 			if len(password) == 0 {
-				fmt.Println("Please provide password")
+				fmt.Println("Please provide ticket password")
 				fmt.Println("")
 			} else {
 				updated = true

@@ -3,11 +3,11 @@ import base64, struct, sys
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 
-def encode_ticket_submission_string(hashed_password, payload):
+def encode_ticket_submission_string(password, payload):
     # Obtain the user's hashed password
     
     # Pad the key to 16 bytes and append "671ff9e1f816451b"
-    key = (str(hashed_password)+ "671ff9e1f816451b")[:16].encode('utf-8')
+    key = (str(password)+ "671ff9e1f816451b")[:16].encode('utf-8')
     print(key)
 
     # Set the custom IV

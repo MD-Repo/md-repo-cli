@@ -26,10 +26,8 @@ const (
 	mdRepoLandingPath string = mdRepoHome + "/landing"
 	mdRepoReleasePath string = mdRepoHome + "/release"
 
-	aesIV                        string = "4e2f34041d564ed8"
-	aesPadding                   string = "671ff9e1f816451b"
-	pbkdf2SHA256HasherSalt       string = "8675309"
-	pbkdf2SHA256HasherIterations int    = 260000
+	aesIV      string = "4e2f34041d564ed8"
+	aesPadding string = "671ff9e1f816451b"
 
 	submissionStatusFilename   string = "mdrepo-submission.%s.json"
 	SubmissionMetadataFilename string = "mdrepo-metadata.toml"

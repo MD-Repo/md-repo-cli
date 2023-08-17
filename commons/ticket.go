@@ -1,11 +1,7 @@
 package commons
 
 import (
-	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
 	"encoding/base64"
-	"encoding/binary"
 	"fmt"
 	"strings"
 
@@ -23,78 +19,7 @@ type MDRepoTicket struct {
 	IRODSDataPath string
 }
 
-// AES key must be 16bytes len
-func padAesKey(key string) string {
-	paddedKey := fmt.Sprintf("%s%s", key, aesPadding)
-	return paddedKey[:16]
-}
-
-func padPkcs7(data []byte, blocksize int) []byte {
-	n := blocksize - (len(data) % blocksize)
-	pb := make([]byte, len(data)+n)
-	copy(pb, data)
-	copy(pb[len(data):], bytes.Repeat([]byte{byte(n)}, n))
-	return pb
-}
-
-func AesDecrypt(key string, data []byte) ([]byte, error) {
-	key = padAesKey(key)
-	block, err := aes.NewCipher([]byte(key))
-	if err != nil {
-		return nil, xerrors.Errorf("failed to create AES cipher: %w", err)
-	}
-
-	contentLength := binary.LittleEndian.Uint32(data[:4])
-
-	decrypter := cipher.NewCBCDecrypter(block, []byte(aesIV))
-
-	dest := make([]byte, len(data[4:]))
-	decrypter.CryptBlocks(dest, data[4:])
-
-	return dest[:contentLength], nil
-}
-
-func AesEncrypt(key string, data []byte) ([]byte, error) {
-	key = padAesKey(key)
-	block, err := aes.NewCipher([]byte(key))
-	if err != nil {
-		return nil, xerrors.Errorf("failed to create AES cipher: %w", err)
-	}
-
-	encrypter := cipher.NewCBCEncrypter(block, []byte(aesIV))
-
-	contentLength := uint32(len(data))
-	padData := padPkcs7(data, block.BlockSize())
-
-	dest := make([]byte, len(padData)+4)
-
-	encrypter.CryptBlocks(dest[4:], padData)
-
-	// add size header
-	binary.LittleEndian.PutUint32(dest, contentLength)
-
-	return dest, nil
-}
-
 func EncodeMDRepoTickets(tickets []MDRepoTicket, password string) (string, error) {
-	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"function": "EncodeMDRepoTickets",
-	})
-
-	hashedPassword, err := HashStringPBKDF2SHA256(password)
-	if err != nil {
-		return "", xerrors.Errorf("failed to MD5 hash password: %w", err)
-	}
-
-	logger.Debugf("password hash string: '%s'", hashedPassword)
-	hashedPasswordParts := strings.Split(hashedPassword, "$")
-	hash := hashedPassword
-	if len(hashedPasswordParts) >= 4 {
-		hash = hashedPasswordParts[3]
-	}
-	logger.Debugf("actual password hash string: '%s'", hash)
-
 	sb := strings.Builder{}
 	for _, ticket := range tickets {
 		if sb.Len() != 0 {
@@ -104,7 +29,7 @@ func EncodeMDRepoTickets(tickets []MDRepoTicket, password string) (string, error
 	}
 
 	payload := sb.String()
-	rawTicket, err := AesEncrypt(hash, []byte(payload))
+	rawTicket, err := AesEncrypt(password, []byte(payload))
 	if err != nil {
 		return "", xerrors.Errorf("failed to AES encode ticket string: %w", err)
 	}
@@ -223,13 +148,6 @@ func DecodeMDRepoTickets(tickets string, password string) ([]MDRepoTicket, error
 		"function": "DecodeMDRepoTickets",
 	})
 
-	hashedPassword, err := HashStringPBKDF2SHA256(password)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to MD5 hash password: %w", err)
-	}
-
-	logger.Debugf("password hash string: '%s'", hashedPassword)
-
 	rawTicket, err := base64.StdEncoding.DecodeString(tickets)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to Base64 decode ticket string '%s': %w", tickets, err)
@@ -237,7 +155,7 @@ func DecodeMDRepoTickets(tickets string, password string) ([]MDRepoTicket, error
 
 	logger.Debugf("raw encrypted ticket data (in hex): '%x'\n", rawTicket)
 
-	payload, err := AesDecrypt(hashedPassword, rawTicket)
+	payload, err := AesDecrypt(password, rawTicket)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to AES decode ticket string: %w", err)
 	}

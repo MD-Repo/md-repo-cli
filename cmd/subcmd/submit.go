@@ -156,6 +156,15 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 	ticketString := strings.TrimSpace(args[0])
 	sourcePaths := args[1:]
 
+	mdRepoTickets, err := commons.GetConfig().GetMDRepoTickets(ticketString)
+	if err != nil {
+		return xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
+	}
+
+	if len(mdRepoTickets) == 0 {
+		return xerrors.Errorf("failed to parse MD-Repo Ticket. No ticket is provided")
+	}
+
 	sourcePaths, err = scanSourcePaths(sourcePaths)
 	if err != nil {
 		return xerrors.Errorf("failed to scan source paths: %w", err)
@@ -175,15 +184,6 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 			return xerrors.Errorf("failed to run with retry %d: %w", retryFlagValues.RetryNumber, err)
 		}
 		return nil
-	}
-
-	mdRepoTickets, err := commons.GetConfig().GetMDRepoTickets(ticketString)
-	if err != nil {
-		return xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
-	}
-
-	if len(mdRepoTickets) == 0 {
-		return xerrors.Errorf("failed to parse MD-Repo Ticket. No ticket is provided")
 	}
 
 	// Create a file system

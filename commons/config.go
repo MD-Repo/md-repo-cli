@@ -1,6 +1,8 @@
 package commons
 
 import (
+	"strings"
+
 	"golang.org/x/xerrors"
 
 	"gopkg.in/yaml.v2"
@@ -19,6 +21,8 @@ func GetDefaultConfig() *Config {
 }
 
 func (config *Config) GetMDRepoTickets(ticket string) ([]MDRepoTicket, error) {
+	ticket = strings.TrimSpace(ticket)
+
 	if config.NoPassword {
 		// plaintext ticket string
 		return GetMDRepoTicketsFromPlainText(ticket)

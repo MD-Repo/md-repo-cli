@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_util "github.com/cyverse/go-irodsclient/irods/util"
@@ -77,44 +76,9 @@ func processGetCommand(command *cobra.Command, args []string) error {
 	ticketString := args[0]
 	targetPath := args[1]
 
-	mdRepoTickets := []commons.MDRepoTicket{}
-
-	_, err = os.Stat(ticketString)
+	mdRepoTickets, err := commons.ReadTicketsFromStringOrFile(commons.GetConfig(), ticketString)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return xerrors.Errorf("failed to read MD-Repo ticket file %s: %w", ticketString, err)
-		}
-		// not exist --> maybe ticket string?
-
-		tickets, err := commons.GetConfig().GetMDRepoTickets(ticketString)
-		if err != nil {
-			return xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
-		}
-
-		mdRepoTickets = append(mdRepoTickets, tickets...)
-	} else {
-		// file exist
-		ticketDataBytes, err := os.ReadFile(ticketString)
-		if err != nil {
-			return xerrors.Errorf("failed to read MD-Repo ticket file %s: %w", ticketString, err)
-		}
-
-		ticketLines := strings.Split(string(ticketDataBytes), "\n")
-		for _, ticketLine := range ticketLines {
-			ticketLine = strings.TrimSpace(ticketLine)
-			if len(ticketLine) > 0 {
-				tickets, err := commons.GetConfig().GetMDRepoTickets(ticketLine)
-				if err != nil {
-					return xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
-				}
-
-				mdRepoTickets = append(mdRepoTickets, tickets...)
-			}
-		}
-	}
-
-	if len(mdRepoTickets) == 0 {
-		return xerrors.Errorf("failed to parse MD-Repo Ticket. No ticket is provided")
+		return xerrors.Errorf("failed to read ticket %s: %w", ticketString, err)
 	}
 
 	// we may further optimize this by run it parallel

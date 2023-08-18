@@ -3,6 +3,7 @@ package commons
 import (
 	"encoding/base64"
 	"fmt"
+	"os"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -169,4 +170,52 @@ func DecodeMDRepoTickets(tickets string, password string) ([]MDRepoTicket, error
 	}
 
 	return GetMDRepoTicketsFromPlainText(string(payload))
+}
+
+func ReadTicketsFromStringOrFile(config *Config, ticketString string) ([]MDRepoTicket, error) {
+	mdRepoTickets := []MDRepoTicket{}
+
+	ticketStat, err := os.Stat(ticketString)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, xerrors.Errorf("failed to read MD-Repo ticket file %s: %w", ticketString, err)
+		}
+		// not exist --> maybe ticket string?
+
+		tickets, err := config.GetMDRepoTickets(ticketString)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
+		}
+
+		mdRepoTickets = append(mdRepoTickets, tickets...)
+	} else {
+		if ticketStat.IsDir() {
+			return nil, xerrors.Errorf("failed to read MD-Repo ticket file %s, it is a directory: %w", ticketString, err)
+		}
+
+		// file exist
+		ticketDataBytes, err := os.ReadFile(ticketString)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to read MD-Repo ticket file %s: %w", ticketString, err)
+		}
+
+		ticketLines := strings.Split(string(ticketDataBytes), "\n")
+		for _, ticketLine := range ticketLines {
+			ticketLine = strings.TrimSpace(ticketLine)
+			if len(ticketLine) > 0 {
+				tickets, err := config.GetMDRepoTickets(ticketLine)
+				if err != nil {
+					return nil, xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
+				}
+
+				mdRepoTickets = append(mdRepoTickets, tickets...)
+			}
+		}
+	}
+
+	if len(mdRepoTickets) == 0 {
+		return nil, xerrors.Errorf("failed to parse MD-Repo Ticket. No ticket is provided")
+	}
+
+	return mdRepoTickets, nil
 }

@@ -153,16 +153,12 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 	retryFlagValues := flag.GetRetryFlagValues()
 	submissionFlagValues := flag.GetSubmissionFlagValues()
 
-	ticketString := strings.TrimSpace(args[0])
+	ticketString := args[0]
 	sourcePaths := args[1:]
 
-	mdRepoTickets, err := commons.GetConfig().GetMDRepoTickets(ticketString)
+	mdRepoTickets, err := commons.ReadTicketsFromStringOrFile(commons.GetConfig(), ticketString)
 	if err != nil {
-		return xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
-	}
-
-	if len(mdRepoTickets) == 0 {
-		return xerrors.Errorf("failed to parse MD-Repo Ticket. No ticket is provided")
+		return xerrors.Errorf("failed to read ticket %s: %w", ticketString, err)
 	}
 
 	sourcePaths, err = scanSourcePaths(sourcePaths)

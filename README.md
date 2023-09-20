@@ -6,10 +6,16 @@ A command-line interface for MD-Repo service
 ## Download pre-built binary
 Download a binary for your target system architecture.
 
-For Darwin-amd64 (Mac OS):
+For Darwin-amd64 (Mac OS Intel):
 ```bash
 CLI_VER=$(curl -L -s https://raw.githubusercontent.com/MD-Repo/md-repo-cli/main/VERSION.txt); \
 curl -L -s https://github.com/MD-Repo/md-repo-cli/releases/download/${CLI_VER}/mdrepo-${CLI_VER}-darwin-amd64.tar.gz | tar zxvf -
+```
+
+For Darwin-arm64 (Mac OS M1/M2):
+```bash
+CLI_VER=$(curl -L -s https://raw.githubusercontent.com/MD-Repo/md-repo-cli/main/VERSION.txt); \
+curl -L -s https://github.com/MD-Repo/md-repo-cli/releases/download/${CLI_VER}/mdrepo-${CLI_VER}-darwin-arm64.tar.gz | tar zxvf -
 ```
 
 For Linux-amd64:

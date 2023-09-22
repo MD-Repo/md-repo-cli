@@ -73,7 +73,8 @@ func main() {
 	subcmd.AddGetCommand(rootCmd)
 	subcmd.AddSubmitCommand(rootCmd)
 	subcmd.AddSubmitListCommand(rootCmd)
-	subcmd.AddDescribeTicketCommand(rootCmd)
+	subcmd.AddDescribeGetTicketCommand(rootCmd)
+	subcmd.AddDescribeSubmitTicketCommand(rootCmd)
 	subcmd.AddUpgradeCommand(rootCmd)
 
 	err := Execute()

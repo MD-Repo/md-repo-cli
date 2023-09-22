@@ -3,7 +3,8 @@ package commons
 import (
 	"encoding/base64"
 	"fmt"
-	"os"
+	"io"
+	"net/http"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -172,46 +173,94 @@ func DecodeMDRepoTickets(tickets string, password string) ([]MDRepoTicket, error
 	return GetMDRepoTicketsFromPlainText(string(payload))
 }
 
-func ReadTicketsFromStringOrFile(config *Config, ticketString string) ([]MDRepoTicket, error) {
+func ReadTicketsFromDownloadHash(config *Config, downloadHash string) ([]MDRepoTicket, bool, error) {
 	mdRepoTickets := []MDRepoTicket{}
 
-	ticketStat, err := os.Stat(ticketString)
+	// check if this is download hash
+	req, err := http.NewRequest("GET", mdRepoDownloadHashApiUrl+"/"+downloadHash, nil)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return nil, xerrors.Errorf("failed to read MD-Repo ticket file %s: %w", ticketString, err)
-		}
-		// not exist --> maybe ticket string?
-
-		tickets, err := config.GetMDRepoTickets(ticketString)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
-		}
-
-		mdRepoTickets = append(mdRepoTickets, tickets...)
-	} else {
-		if ticketStat.IsDir() {
-			return nil, xerrors.Errorf("failed to read MD-Repo ticket file %s, it is a directory: %w", ticketString, err)
-		}
-
-		// file exist
-		ticketDataBytes, err := os.ReadFile(ticketString)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to read MD-Repo ticket file %s: %w", ticketString, err)
-		}
-
-		ticketLines := strings.Split(string(ticketDataBytes), "\n")
-		for _, ticketLine := range ticketLines {
-			ticketLine = strings.TrimSpace(ticketLine)
-			if len(ticketLine) > 0 {
-				tickets, err := config.GetMDRepoTickets(ticketLine)
-				if err != nil {
-					return nil, xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
-				}
-
-				mdRepoTickets = append(mdRepoTickets, tickets...)
-			}
-		}
+		return nil, false, xerrors.Errorf("failed to create a new request to retrieve download tickets: %w", err)
 	}
+
+	req.Header.Add("Accept", "text/plain")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, false, xerrors.Errorf("failed to perform http get to retrieve download tickets: %w", err)
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return nil, true, xerrors.Errorf("failed to retrieve download tickets from hash, not exist")
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, false, xerrors.Errorf("failed to retrieve download tickets from hash, http error %s", resp.Status)
+	}
+
+	ticketStringBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, false, xerrors.Errorf("failed to retrieve download tickets from hash, read failed: %w", err)
+	}
+
+	ticketString := string(ticketStringBytes)
+	if len(strings.TrimSpace(ticketString)) == 0 {
+		return nil, false, xerrors.Errorf("failed to retrieve download tickets from hash, content empty: %w", err)
+	}
+
+	tickets, err := config.GetMDRepoTickets(ticketString)
+	if err != nil {
+		return nil, false, xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
+	}
+
+	mdRepoTickets = append(mdRepoTickets, tickets...)
+
+	if len(mdRepoTickets) == 0 {
+		return nil, false, xerrors.Errorf("failed to parse MD-Repo Ticket. No ticket is provided")
+	}
+
+	return mdRepoTickets, false, nil
+}
+
+func ReadTicketsFromStringOrDownloadHash(config *Config, ticketString string) ([]MDRepoTicket, error) {
+	// check if this is download hash
+	mdRepoTickets, checkString, err := ReadTicketsFromDownloadHash(config, ticketString)
+	if !checkString {
+		if err != nil {
+			return nil, err
+		}
+
+		// got tickets
+		return mdRepoTickets, nil
+	}
+
+	// given string is ticket string
+	mdRepoTickets = []MDRepoTicket{}
+
+	tickets, err := config.GetMDRepoTickets(ticketString)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
+	}
+
+	mdRepoTickets = append(mdRepoTickets, tickets...)
+
+	if len(mdRepoTickets) == 0 {
+		return nil, xerrors.Errorf("failed to parse MD-Repo Ticket. No ticket is provided")
+	}
+
+	return mdRepoTickets, nil
+}
+
+func ReadTicketsFromString(config *Config, ticketString string) ([]MDRepoTicket, error) {
+	mdRepoTickets := []MDRepoTicket{}
+
+	tickets, err := config.GetMDRepoTickets(ticketString)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to parse MD-Repo Ticket: %w", err)
+	}
+
+	mdRepoTickets = append(mdRepoTickets, tickets...)
 
 	if len(mdRepoTickets) == 0 {
 		return nil, xerrors.Errorf("failed to parse MD-Repo Ticket. No ticket is provided")

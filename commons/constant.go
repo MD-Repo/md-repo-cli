@@ -26,6 +26,8 @@ const (
 	mdRepoLandingPath string = mdRepoHome + "/landing"
 	mdRepoReleasePath string = mdRepoHome + "/release"
 
+	mdRepoDownloadHashApiUrl string = "https://xxx.xxx.xxx/download_ticket"
+
 	aesIV      string = "4e2f34041d564ed8"
 	aesPadding string = "671ff9e1f816451b"
 

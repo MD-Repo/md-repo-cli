@@ -57,7 +57,7 @@ func processSubmitListCommand(command *cobra.Command, args []string) error {
 
 	ticketString := args[0]
 
-	mdRepoTickets, err := commons.ReadTicketsFromStringOrFile(commons.GetConfig(), ticketString)
+	mdRepoTickets, err := commons.ReadTicketsFromString(commons.GetConfig(), ticketString)
 	if err != nil {
 		return xerrors.Errorf("failed to read ticket %s: %w", ticketString, err)
 	}

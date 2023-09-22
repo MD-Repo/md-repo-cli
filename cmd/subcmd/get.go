@@ -73,12 +73,12 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		return nil
 	}
 
-	ticketString := args[0]
+	downloadHash := args[0]
 	targetPath := args[1]
 
-	mdRepoTickets, err := commons.ReadTicketsFromStringOrFile(commons.GetConfig(), ticketString)
+	mdRepoTickets, err := commons.ReadTicketsFromStringOrDownloadHash(commons.GetConfig(), downloadHash)
 	if err != nil {
-		return xerrors.Errorf("failed to read ticket %s: %w", ticketString, err)
+		return xerrors.Errorf("failed to retrieve ticket string %s: %w", downloadHash, err)
 	}
 
 	// we may further optimize this by run it parallel

@@ -3,14 +3,13 @@ module github.com/MD-Repo/md-repo-cli
 go 1.18
 
 require (
-	github.com/alexandrevicenzi/unchained v1.3.0
 	github.com/creativeprojects/go-selfupdate v1.1.0
 	github.com/cyverse/go-irodsclient v0.12.8-0.20230814221328-5b3ecb4dc4eb
 	github.com/jedib0t/go-pretty/v6 v6.4.6
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.8.4
-	golang.org/x/term v0.5.0
+	golang.org/x/crypto v0.6.0
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2
 	gopkg.in/yaml.v2 v2.4.0
 )
@@ -36,7 +35,6 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/ulikunitz/xz v0.5.11 // indirect
 	github.com/xanzy/go-gitlab v0.80.2 // indirect
-	golang.org/x/crypto v0.6.0 // indirect
 	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/oauth2 v0.5.0 // indirect
 	golang.org/x/sys v0.8.0 // indirect

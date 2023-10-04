@@ -18,45 +18,24 @@ import (
 )
 
 var submitCmd = &cobra.Command{
-	Use:     "submit [mdrepo_ticket] [data dirs] ...",
+	Use:     "submit [data dirs] ...",
 	Short:   "Submit local data to MD-Repo",
 	Aliases: []string{"upload", "up", "put"},
 	RunE:    processSubmitCommand,
-	Args:    cobra.MinimumNArgs(2),
+	Args:    cobra.MinimumNArgs(1),
 }
 
 func AddSubmitCommand(rootCmd *cobra.Command) {
 	// attach common flags
 	flag.SetCommonFlags(submitCmd)
 
+	flag.SetTokenFlags(submitCmd)
 	flag.SetForceFlags(submitCmd, true)
 	flag.SetParallelTransferFlags(submitCmd, true)
 	flag.SetProgressFlags(submitCmd)
 	flag.SetRetryFlags(submitCmd)
 
 	rootCmd.AddCommand(submitCmd)
-}
-
-// inputSubmissionFields inputs submission fields
-func inputSubmissionFields(flagValues *flag.SubmissionFlagValues, sourcePaths []string) error {
-	if flagValues.ExpectedSimulations <= 0 {
-		fmt.Print("The number of simulations in the submission: ")
-		fmt.Scanln(&flagValues.ExpectedSimulations)
-	}
-
-	numSimulations := len(sourcePaths)
-	if flagValues.ExpectedSimulations != numSimulations {
-		fmt.Printf("Error! We found %d simulations, but %d simulations are expected\n", numSimulations, flagValues.ExpectedSimulations)
-
-		fmt.Printf("The simulations we found are:\n")
-		for _, sourcePath := range sourcePaths {
-			fmt.Printf("> %s\n", sourcePath)
-		}
-
-		return xerrors.Errorf("The number of simulations typed (%d) does not match the number of simulations we found (%d)", flagValues.ExpectedSimulations, numSimulations)
-	}
-
-	return nil
 }
 
 func checkValidSourcePath(sourcePath string) error {
@@ -70,14 +49,9 @@ func checkValidSourcePath(sourcePath string) error {
 	}
 
 	// check if source path has metadata in it
-	metadataPath := filepath.Join(sourcePath, commons.SubmissionMetadataFilename)
-	metadataStat, err := os.Stat(metadataPath)
-	if err == nil {
-		if !metadataStat.IsDir() && metadataStat.Size() > 0 {
-			// found
-			return nil
-		}
-		return xerrors.Errorf("invalid metadata file %s", metadataPath)
+	if commons.HasSubmitMetadataInDir(sourcePath) {
+		// found
+		return nil
 	}
 
 	// metadata path not exist?
@@ -85,8 +59,8 @@ func checkValidSourcePath(sourcePath string) error {
 }
 
 // scanSourcePaths scans source paths and return valid sources only
-func scanSourcePaths(sourcePaths []string) ([]string, error) {
-	validSourcePaths := []string{}
+func scanSourcePaths(sourcePaths []string) ([]string, string, error) {
+	foundSourcePaths := []string{}
 
 	for _, sourcePath := range sourcePaths {
 		sourcePath = commons.MakeLocalPath(sourcePath)
@@ -94,23 +68,23 @@ func scanSourcePaths(sourcePaths []string) ([]string, error) {
 		err := checkValidSourcePath(sourcePath)
 		if err == nil {
 			// valid
-			validSourcePaths = append(validSourcePaths, sourcePath)
+			foundSourcePaths = append(foundSourcePaths, sourcePath)
 			continue
 		}
 
 		// may have sub dirs?
 		st, stErr := os.Stat(sourcePath)
 		if stErr != nil {
-			return nil, err
+			return nil, "", err
 		}
 
 		if !st.IsDir() {
-			return nil, err
+			return nil, "", err
 		}
 
 		dirEntries, readErr := os.ReadDir(sourcePath)
 		if readErr != nil {
-			return nil, xerrors.Errorf("failed to list source %s: %w", sourcePath, readErr)
+			return nil, "", xerrors.Errorf("failed to list source %s: %w", sourcePath, readErr)
 		}
 
 		for _, dirEntry := range dirEntries {
@@ -118,12 +92,32 @@ func scanSourcePaths(sourcePaths []string) ([]string, error) {
 			chkErr := checkValidSourcePath(entryPath)
 			if chkErr == nil {
 				// valid
-				validSourcePaths = append(validSourcePaths, entryPath)
+				foundSourcePaths = append(foundSourcePaths, entryPath)
 			}
 		}
 	}
 
-	return validSourcePaths, nil
+	orcIDFound := ""
+	for _, foundSourcePath := range foundSourcePaths {
+		orcID, err := commons.ReadOrcIDFromSubmitMetadataFileInDir(foundSourcePath)
+		if err != nil {
+			return nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %s: %w", foundSourcePath, err)
+		}
+
+		if len(orcID) == 0 {
+			return nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %s: %w", foundSourcePath, commons.InvalidOrcIDError)
+		}
+
+		if len(orcIDFound) == 0 {
+			orcIDFound = orcID
+		}
+
+		if orcIDFound != orcID {
+			return nil, "", xerrors.Errorf("Lead Contributor's ORC-ID mismatch for %s, expected %s, but got %s: %w", foundSourcePath, orcIDFound, orcID, commons.InvalidOrcIDError)
+		}
+	}
+
+	return foundSourcePaths, orcIDFound, nil
 }
 
 func processSubmitCommand(command *cobra.Command, args []string) error {
@@ -141,40 +135,83 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 		return nil
 	}
 
+	tokenFlagValues := flag.GetTokenFlagValues()
+	forceFlagValues := flag.GetForceFlagValues()
+	parallelTransferFlagValues := flag.GetParallelTransferFlagValues()
+	progressFlagValues := flag.GetProgressFlagValues()
+	retryFlagValues := flag.GetRetryFlagValues()
+	submissionFlagValues := flag.GetSubmissionFlagValues()
+	config := commons.GetConfig()
+
+	// handle token
+	if len(tokenFlagValues.TicketString) > 0 {
+		config.TicketString = tokenFlagValues.TicketString
+	}
+
+	if len(tokenFlagValues.Token) > 0 {
+		config.Token = tokenFlagValues.Token
+	}
+
 	// handle local flags
 	_, err = commons.InputMissingFields()
 	if err != nil {
 		return xerrors.Errorf("failed to input missing fields: %w", err)
 	}
 
-	forceFlagValues := flag.GetForceFlagValues()
-	parallelTransferFlagValues := flag.GetParallelTransferFlagValues()
-	progressFlagValues := flag.GetProgressFlagValues()
-	retryFlagValues := flag.GetRetryFlagValues()
-	submissionFlagValues := flag.GetSubmissionFlagValues()
-
-	ticketString := args[0]
-	sourcePaths := args[1:]
-
-	mdRepoTickets, err := commons.ReadTicketsFromString(commons.GetConfig(), ticketString)
-	if err != nil {
-		return xerrors.Errorf("failed to read ticket %s: %w", ticketString, err)
-	}
-
-	sourcePaths, err = scanSourcePaths(sourcePaths)
+	sourcePaths := args[0:]
+	sourcePaths, orcID, err := scanSourcePaths(sourcePaths)
 	if err != nil {
 		return xerrors.Errorf("failed to scan source paths: %w", err)
 	}
 
 	if !retryFlagValues.RetryChild {
 		// only parent has input
-		err = inputSubmissionFields(submissionFlagValues, sourcePaths)
-		if err != nil {
-			return xerrors.Errorf("failed to input submission fields: %w", err)
+		expectedSimulationNo := 0
+		if submissionFlagValues.ExpectedSimulations > 0 {
+			expectedSimulationNo = submissionFlagValues.ExpectedSimulations
+		} else {
+			expectedSimulationNo = commons.InputSimulationNo()
+		}
+
+		numSimulations := len(sourcePaths)
+		if expectedSimulationNo != numSimulations {
+			logger.Debugf("we found %d simulations, but expected %d simulations", numSimulations, expectedSimulationNo)
+
+			logger.Debugf("the simulations we found are:")
+			for sourceIdx, sourcePath := range sourcePaths {
+				logger.Debugf("[%d] %s\n", sourceIdx+1, sourcePath)
+			}
+
+			return xerrors.Errorf("The number of simulations typed (%d) does not match the number of simulations we found (%d)", expectedSimulationNo, numSimulations)
 		}
 	}
 
-	if retryFlagValues.RetryNumber > 1 && !retryFlagValues.RetryChild {
+	if len(config.Token) > 0 && len(config.TicketString) == 0 {
+		// orcID
+		// override ORC-ID
+		if len(submissionFlagValues.OrcID) > 0 {
+			orcID = submissionFlagValues.OrcID
+		}
+
+		// encrypt
+		newToken, err := commons.HMACStringSHA224(config.Token, orcID)
+		if err != nil {
+			return xerrors.Errorf("failed to encrypt token using SHA3-224 HMAC: %w", err)
+		}
+
+		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(newToken)
+		if err != nil {
+			return xerrors.Errorf("failed to read ticket from token: %w", err)
+		}
+	}
+
+	if len(config.TicketString) == 0 {
+		return commons.TokenNotProvidedError
+	}
+
+	maxConnectionNum := parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
+
+	if retryFlagValues.RetryNumber > 0 && !retryFlagValues.RetryChild {
 		err = commons.RunWithRetry(retryFlagValues.RetryNumber, retryFlagValues.RetryIntervalSeconds)
 		if err != nil {
 			return xerrors.Errorf("failed to run with retry %d: %w", retryFlagValues.RetryNumber, err)
@@ -182,13 +219,16 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 		return nil
 	}
 
+	mdRepoTicket, err := commons.GetMDRepoTicketFromString(config.TicketString)
+	if err != nil {
+		return xerrors.Errorf("failed to retrieve ticket: %w", err)
+	}
+
 	// Create a file system
-	account, err := commons.GetAccount(&mdRepoTickets[0])
+	account, err := commons.GetAccount(&mdRepoTicket)
 	if err != nil {
 		return xerrors.Errorf("failed to get iRODS Account: %w", err)
 	}
-
-	maxConnectionNum := parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
 
 	filesystem, err := commons.GetIRODSFSClientAdvanced(account, maxConnectionNum, parallelTransferFlagValues.TCPBufferSize)
 	if err != nil {
@@ -197,10 +237,10 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 
 	defer filesystem.Release()
 
-	targetPath := commons.MakeIRODSLandingPath(mdRepoTickets[0].IRODSDataPath)
+	targetPath := commons.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
 
 	// display
-	logger.Debugf("submission iRODS ticket: %s", mdRepoTickets[0].IRODSTicket)
+	logger.Debugf("submission iRODS ticket: %s", mdRepoTicket.IRODSTicket)
 	logger.Debugf("submission path: %s", targetPath)
 
 	submitStatusFile := commons.NewSubmitStatusFile()

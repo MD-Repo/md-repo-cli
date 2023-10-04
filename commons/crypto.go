@@ -1,18 +1,15 @@
 package commons
 
 import (
-	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/md5"
-	"crypto/sha256"
-	"encoding/binary"
+	"encoding/base64"
 	"encoding/hex"
-	"fmt"
 	"hash"
 	"io"
 	"os"
 
+	"golang.org/x/crypto/sha3"
 	"golang.org/x/xerrors"
 )
 
@@ -41,18 +38,19 @@ func HashLocalFile(sourcePath string, hashAlg hash.Hash) (string, error) {
 }
 
 func HashStringMD5(str string) (string, error) {
-	hashAlg := md5.New()
-	return HashStrings([]string{str}, hashAlg)
+	return HashStrings([]string{str}, md5.New())
 }
 
 func HashStringsMD5(strs []string) (string, error) {
-	hashAlg := md5.New()
-	return HashStrings(strs, hashAlg)
+	return HashStrings(strs, md5.New())
 }
 
-func HashStringSHA256(str string) (string, error) {
-	hashAlg := sha256.New()
-	return HashStrings([]string{str}, hashAlg)
+func HashStringSHA224(str string) (string, error) {
+	return HashStrings([]string{str}, sha3.New224())
+}
+
+func HashStringsSHA224(strs []string) (string, error) {
+	return HashStrings(strs, sha3.New224())
 }
 
 func HashStrings(strs []string, hashAlg hash.Hash) (string, error) {
@@ -69,55 +67,23 @@ func HashStrings(strs []string, hashAlg hash.Hash) (string, error) {
 	return sumString, nil
 }
 
-// AES key must be 16bytes len
-func padAesKey(key string) string {
-	paddedKey := fmt.Sprintf("%s%s", key, aesPadding)
-	return paddedKey[:16]
+func HMACStringSHA224(secret string, str string) (string, error) {
+	return HMACStrings(secret, []string{str}, sha3.New224)
 }
 
-func padPkcs7(data []byte, blocksize int) []byte {
-	n := blocksize - (len(data) % blocksize)
-	pb := make([]byte, len(data)+n)
-	copy(pb, data)
-	copy(pb[len(data):], bytes.Repeat([]byte{byte(n)}, n))
-	return pb
-}
+func HMACStrings(secret string, strs []string, hashAlg func() hash.Hash) (string, error) {
+	hmac := hmac.New(hashAlg, []byte(secret))
 
-func AesDecrypt(key string, data []byte) ([]byte, error) {
-	key = padAesKey(key)
-	block, err := aes.NewCipher([]byte(key))
-	if err != nil {
-		return nil, xerrors.Errorf("failed to create AES cipher: %w", err)
+	for _, str := range strs {
+		_, err := hmac.Write([]byte(str))
+		if err != nil {
+			return "", xerrors.Errorf("failed to write: %w", err)
+		}
 	}
 
-	contentLength := binary.LittleEndian.Uint32(data[:4])
+	sumBytes := hmac.Sum(nil)
 
-	decrypter := cipher.NewCBCDecrypter(block, []byte(aesIV))
-
-	dest := make([]byte, len(data[4:]))
-	decrypter.CryptBlocks(dest, data[4:])
-
-	return dest[:contentLength], nil
-}
-
-func AesEncrypt(key string, data []byte) ([]byte, error) {
-	key = padAesKey(key)
-	block, err := aes.NewCipher([]byte(key))
-	if err != nil {
-		return nil, xerrors.Errorf("failed to create AES cipher: %w", err)
-	}
-
-	encrypter := cipher.NewCBCEncrypter(block, []byte(aesIV))
-
-	contentLength := uint32(len(data))
-	padData := padPkcs7(data, block.BlockSize())
-
-	dest := make([]byte, len(padData)+4)
-
-	encrypter.CryptBlocks(dest[4:], padData)
-
-	// add size header
-	binary.LittleEndian.PutUint32(dest, contentLength)
-
-	return dest, nil
+	// base64
+	sumString := base64.URLEncoding.EncodeToString(sumBytes)
+	return sumString, nil
 }

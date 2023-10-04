@@ -17,18 +17,19 @@ import (
 )
 
 var getCmd = &cobra.Command{
-	Use:     "get [mdrepo_ticket|mdrepo_ticket_file_path] [local dir]",
+	Use:     "get [local dir]",
 	Short:   "Download MD-Repo data to local dir",
 	Aliases: []string{"download", "down"},
 	Long:    `This downloads MD-Repo data to the given local dir.`,
 	RunE:    processGetCommand,
-	Args:    cobra.ExactArgs(2),
+	Args:    cobra.ExactArgs(1),
 }
 
 func AddGetCommand(rootCmd *cobra.Command) {
 	// attach common flags
 	flag.SetCommonFlags(getCmd)
 
+	flag.SetTokenFlags(getCmd)
 	flag.SetForceFlags(getCmd, false)
 	flag.SetParallelTransferFlags(getCmd, false)
 	flag.SetProgressFlags(getCmd)
@@ -52,12 +53,7 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// handle local flags
-	_, err = commons.InputMissingFields()
-	if err != nil {
-		return xerrors.Errorf("failed to input missing fields: %w", err)
-	}
-
+	tokenFlagValues := flag.GetTokenFlagValues()
 	forceFlagValues := flag.GetForceFlagValues()
 	parallelTransferFlagValues := flag.GetParallelTransferFlagValues()
 	progressFlagValues := flag.GetProgressFlagValues()
@@ -65,7 +61,35 @@ func processGetCommand(command *cobra.Command, args []string) error {
 
 	maxConnectionNum := parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
 
-	if retryFlagValues.RetryNumber > 1 && !retryFlagValues.RetryChild {
+	config := commons.GetConfig()
+
+	// handle token
+	if len(tokenFlagValues.TicketString) > 0 {
+		config.TicketString = tokenFlagValues.TicketString
+	}
+
+	if len(tokenFlagValues.Token) > 0 {
+		config.Token = tokenFlagValues.Token
+	}
+
+	// handle local flags
+	_, err = commons.InputMissingFields()
+	if err != nil {
+		return xerrors.Errorf("failed to input missing fields: %w", err)
+	}
+
+	if len(config.Token) > 0 && len(config.TicketString) == 0 {
+		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(config.Token)
+		if err != nil {
+			return xerrors.Errorf("failed to read ticket from token: %w", err)
+		}
+	}
+
+	if len(config.TicketString) == 0 {
+		return commons.TokenNotProvidedError
+	}
+
+	if retryFlagValues.RetryNumber > 0 && !retryFlagValues.RetryChild {
 		err = commons.RunWithRetry(retryFlagValues.RetryNumber, retryFlagValues.RetryIntervalSeconds)
 		if err != nil {
 			return xerrors.Errorf("failed to run with retry %d: %w", retryFlagValues.RetryNumber, err)
@@ -73,12 +97,11 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		return nil
 	}
 
-	downloadHash := args[0]
-	targetPath := args[1]
+	targetPath := args[0]
 
-	mdRepoTickets, err := commons.ReadTicketsFromStringOrDownloadHash(commons.GetConfig(), downloadHash)
+	mdRepoTickets, err := commons.GetMDRepoTicketsFromString(config.TicketString)
 	if err != nil {
-		return xerrors.Errorf("failed to retrieve ticket string %s: %w", downloadHash, err)
+		return xerrors.Errorf("failed to retrieve tickets: %w", err)
 	}
 
 	// we may further optimize this by run it parallel

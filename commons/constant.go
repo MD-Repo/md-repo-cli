@@ -26,10 +26,7 @@ const (
 	mdRepoLandingPath string = mdRepoHome + "/landing"
 	mdRepoReleasePath string = mdRepoHome + "/release"
 
-	mdRepoDownloadHashApiUrl string = "https://xxx.xxx.xxx/download_ticket"
-
-	aesIV      string = "4e2f34041d564ed8"
-	aesPadding string = "671ff9e1f816451b"
+	mdRepoGetTicketApiUrl string = "http://128.196.65.71:8000/api/get_ticket"
 
 	submissionStatusFilename   string = "mdrepo-submission.%s.json"
 	SubmissionMetadataFilename string = "mdrepo-metadata.toml"

@@ -20,16 +20,18 @@ import (
 )
 
 var submitListCmd = &cobra.Command{
-	Use:     "submitls [mdrepo_ticket]",
+	Use:     "submitls",
 	Short:   "List MD-Repo submission data",
 	Aliases: []string{"submit_ls", "list_submission", "list_submit"},
 	RunE:    processSubmitListCommand,
-	Args:    cobra.ExactArgs(1),
+	Args:    cobra.NoArgs,
 }
 
 func AddSubmitListCommand(rootCmd *cobra.Command) {
 	// attach common flags
 	flag.SetCommonFlags(submitListCmd)
+
+	flag.SetTokenFlags(submitListCmd)
 
 	rootCmd.AddCommand(submitListCmd)
 }
@@ -49,21 +51,51 @@ func processSubmitListCommand(command *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// handle token
+	tokenFlagValues := flag.GetTokenFlagValues()
+	config := commons.GetConfig()
+
+	if len(tokenFlagValues.TicketString) > 0 {
+		config.TicketString = tokenFlagValues.TicketString
+	}
+
+	if len(tokenFlagValues.Token) > 0 {
+		config.Token = tokenFlagValues.Token
+	}
+
 	// handle local flags
 	_, err = commons.InputMissingFields()
 	if err != nil {
 		return xerrors.Errorf("failed to input missing fields: %w", err)
 	}
 
-	ticketString := args[0]
+	if len(config.Token) > 0 && len(config.TicketString) == 0 {
+		// handle orcid
+		orcID := commons.InputOrcID()
 
-	mdRepoTickets, err := commons.ReadTicketsFromString(commons.GetConfig(), ticketString)
+		// encrypt
+		newToken, err := commons.HMACStringSHA224(config.Token, orcID)
+		if err != nil {
+			return xerrors.Errorf("failed to encrypt token using SHA3-224 HMAC: %w", err)
+		}
+
+		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(newToken)
+		if err != nil {
+			return xerrors.Errorf("failed to read ticket from token: %w", err)
+		}
+	}
+
+	if len(config.TicketString) == 0 {
+		return commons.TokenNotProvidedError
+	}
+
+	mdRepoTicket, err := commons.GetMDRepoTicketFromString(config.TicketString)
 	if err != nil {
-		return xerrors.Errorf("failed to read ticket %s: %w", ticketString, err)
+		return xerrors.Errorf("failed to retrieve ticket: %w", err)
 	}
 
 	// Create a file system
-	account, err := commons.GetAccount(&mdRepoTickets[0])
+	account, err := commons.GetAccount(&mdRepoTicket)
 	if err != nil {
 		return xerrors.Errorf("failed to get iRODS Account: %w", err)
 	}
@@ -75,10 +107,10 @@ func processSubmitListCommand(command *cobra.Command, args []string) error {
 
 	defer filesystem.Release()
 
-	targetPath := commons.MakeIRODSLandingPath(mdRepoTickets[0].IRODSDataPath)
+	targetPath := commons.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
 
 	// display
-	logger.Debugf("submission iRODS ticket: %s", mdRepoTickets[0].IRODSTicket)
+	logger.Debugf("submission iRODS ticket: %s", mdRepoTicket.IRODSTicket)
 	logger.Debugf("submission path: %s", targetPath)
 
 	err = listOne(filesystem, targetPath, targetPath)

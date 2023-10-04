@@ -5,10 +5,8 @@ import (
 	"io"
 	"os"
 	"strings"
-	"syscall"
 
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
-	"golang.org/x/term"
 	"golang.org/x/xerrors"
 )
 
@@ -58,26 +56,20 @@ func GetAccount(ticket *MDRepoTicket) (*irodsclient_types.IRODSAccount, error) {
 func InputMissingFields() (bool, error) {
 	updated := false
 
-	if !appConfig.NoPassword {
-		password := appConfig.Password
-		for len(password) == 0 {
-			fmt.Print("Ticket password: ")
-			bytePassword, err := term.ReadPassword(int(syscall.Stdin))
-			if err != nil {
-				return false, xerrors.Errorf("failed to read password: %w", err)
-			}
-
+	if len(appConfig.TicketString) == 0 && len(appConfig.Token) == 0 {
+		token := appConfig.Token
+		for len(token) == 0 {
+			fmt.Print("Input token: ")
+			fmt.Scanln(&token)
 			fmt.Print("\n")
-			password = string(bytePassword)
 
-			if len(password) == 0 {
-				fmt.Println("Please provide ticket password")
-				fmt.Println("")
+			if len(token) == 0 {
+				fmt.Println("Error! Please type token.")
 			} else {
 				updated = true
+				appConfig.Token = token
 			}
 		}
-		appConfig.Password = password
 	}
 
 	return updated, nil
@@ -96,8 +88,7 @@ func InputMissingFieldsFromStdin() error {
 		return xerrors.Errorf("failed to read missing config values: %w", err)
 	}
 
-	appConfig.NoPassword = configTypeIn.NoPassword
-	appConfig.Password = configTypeIn.Password
+	appConfig.TicketString = configTypeIn.TicketString
 
 	return nil
 }
@@ -119,4 +110,22 @@ func InputYN(msg string) bool {
 			return false
 		}
 	}
+}
+
+// InputOrcID inputs ORCID
+func InputOrcID() string {
+	var orcID string
+	fmt.Print("Input ORC-ID: ")
+	fmt.Scanln(&orcID)
+
+	return orcID
+}
+
+// InputSimulationNo inputs simulation no
+func InputSimulationNo() int {
+	var simulationNo int
+	fmt.Print("Number of simulations expected: ")
+	fmt.Scanln(&simulationNo)
+
+	return simulationNo
 }

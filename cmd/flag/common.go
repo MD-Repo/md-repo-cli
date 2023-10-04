@@ -16,13 +16,7 @@ type CommonFlagValues struct {
 	logLevelInput   string
 	LogLevel        log.Level
 	LogLevelUpdated bool
-	Password        string
-	PlainTextTicket bool
 }
-
-const (
-	IRODSEnvironmentFileEnvKey string = "IRODS_ENVIRONMENT_FILE"
-)
 
 var (
 	commonFlagValues CommonFlagValues
@@ -33,16 +27,12 @@ func SetCommonFlags(command *cobra.Command) {
 	command.Flags().BoolVarP(&commonFlagValues.ShowHelp, "help", "h", false, "Print help")
 	command.Flags().BoolVarP(&commonFlagValues.DebugMode, "debug", "d", false, "Enable debug mode")
 	command.Flags().StringVar(&commonFlagValues.logLevelInput, "log_level", "", "Set log level")
-	command.Flags().StringVar(&commonFlagValues.Password, "password", "", "Set password (not secure)")
-	command.Flags().BoolVar(&commonFlagValues.PlainTextTicket, "plaintext_ticket", false, "Use ticket in plaintext")
-
-	command.Flags().MarkHidden("plaintext_ticket")
 
 	command.MarkFlagsMutuallyExclusive("debug", "version")
 	command.MarkFlagsMutuallyExclusive("log_level", "version")
 }
 
-func GetCommonFlagValues(command *cobra.Command) *CommonFlagValues {
+func GetCommonFlagValues() *CommonFlagValues {
 	if len(commonFlagValues.logLevelInput) > 0 {
 		lvl, err := log.ParseLevel(commonFlagValues.logLevelInput)
 		if err != nil {
@@ -56,7 +46,7 @@ func GetCommonFlagValues(command *cobra.Command) *CommonFlagValues {
 }
 
 func ProcessCommonFlags(command *cobra.Command) (bool, error) {
-	myCommonFlagValues := GetCommonFlagValues(command)
+	myCommonFlagValues := GetCommonFlagValues()
 	retryFlagValues := GetRetryFlagValues()
 
 	if myCommonFlagValues.DebugMode {
@@ -77,8 +67,6 @@ func ProcessCommonFlags(command *cobra.Command) (bool, error) {
 		return false, nil // stop here
 	}
 
-	commons.SetDefaultConfigIfEmpty()
-
 	// re-configure level
 	if myCommonFlagValues.DebugMode {
 		log.SetLevel(log.DebugLevel)
@@ -94,15 +82,6 @@ func ProcessCommonFlags(command *cobra.Command) (bool, error) {
 		if err != nil {
 			return false, xerrors.Errorf("failed to load config from stdin: %w", err) // stop here
 		}
-	}
-
-	appConfig := commons.GetConfig()
-	if myCommonFlagValues.PlainTextTicket {
-		appConfig.NoPassword = true
-	}
-
-	if !myCommonFlagValues.PlainTextTicket {
-		appConfig.Password = myCommonFlagValues.Password
 	}
 
 	return true, nil // contiue

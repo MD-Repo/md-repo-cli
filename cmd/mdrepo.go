@@ -73,8 +73,6 @@ func main() {
 	subcmd.AddGetCommand(rootCmd)
 	subcmd.AddSubmitCommand(rootCmd)
 	subcmd.AddSubmitListCommand(rootCmd)
-	subcmd.AddDescribeGetTicketCommand(rootCmd)
-	subcmd.AddDescribeSubmitTicketCommand(rootCmd)
 	subcmd.AddUpgradeCommand(rootCmd)
 
 	err := Execute()
@@ -85,10 +83,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Failed to establish a connection to MD-Repo data server!\n")
 		} else if irodsclient_types.IsAuthError(err) {
 			fmt.Fprintf(os.Stderr, "Authentication failed!\n")
-		} else if errors.Is(err, commons.WrongPasswordError) {
-			fmt.Fprintf(os.Stderr, "Wrong ticket password!\n")
 		} else if errors.Is(err, commons.InvalidTicketError) {
 			fmt.Fprintf(os.Stderr, "Invalid ticket string!\n")
+		} else if errors.Is(err, commons.InvalidTokenError) {
+			fmt.Fprintf(os.Stderr, "Invalid token!\n")
+		} else if errors.Is(err, commons.TokenNotProvidedError) {
+			fmt.Fprintf(os.Stderr, "Token not provided!\n")
 		} else {
 			fmt.Fprintf(os.Stderr, "Error: %s\nError Trace:\n  - %+v\n", err.Error(), err)
 		}

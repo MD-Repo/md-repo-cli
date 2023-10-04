@@ -1,46 +1,31 @@
 package commons
 
 import (
-	"strings"
-
 	"golang.org/x/xerrors"
 
 	"gopkg.in/yaml.v2"
 )
 
 type Config struct {
-	NoPassword bool
-	Password   string
+	Token        string
+	TicketString string
 }
 
 func GetDefaultConfig() *Config {
 	return &Config{
-		NoPassword: false,
-		Password:   "",
+		Token:        "",
+		TicketString: "",
 	}
-}
-
-func (config *Config) GetMDRepoTickets(ticket string) ([]MDRepoTicket, error) {
-	ticket = strings.TrimSpace(ticket)
-
-	if config.NoPassword {
-		// plaintext ticket string
-		return GetMDRepoTicketsFromPlainText(ticket)
-	}
-
-	return DecodeMDRepoTickets(ticket, config.Password)
 }
 
 func (config *Config) ToConfigTypeIn() *ConfigTypeIn {
 	return &ConfigTypeIn{
-		NoPassword: config.NoPassword,
-		Password:   config.Password,
+		TicketString: config.TicketString,
 	}
 }
 
 type ConfigTypeIn struct {
-	NoPassword bool   `yaml:"no_password,omitempty"`
-	Password   string `yaml:"irods_user_password,omitempty"`
+	TicketString string `yaml:"ticket_string,omitempty"`
 }
 
 // NewConfigTypeInFromYAML creates ConfigTypeIn from YAML

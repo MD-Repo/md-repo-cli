@@ -1,11 +1,6 @@
 package commons
 
-import (
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-)
-
+/*
 func TestTicket(t *testing.T) {
 	t.Run("test AES", testAES)
 	t.Run("test SingleTicket", testSingleTicket)
@@ -72,3 +67,4 @@ func testMultiTickets(t *testing.T) {
 	assert.Len(t, decryptedMDRepoTicket, 2)
 	assert.Equal(t, tickets, decryptedMDRepoTicket)
 }
+*/

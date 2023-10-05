@@ -61,7 +61,6 @@ func InputMissingFields() (bool, error) {
 		for len(token) == 0 {
 			fmt.Print("Input token: ")
 			fmt.Scanln(&token)
-			fmt.Print("\n")
 
 			if len(token) == 0 {
 				fmt.Println("Error! Please type token.")

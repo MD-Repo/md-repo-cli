@@ -32,6 +32,7 @@ func AddSubmitListCommand(rootCmd *cobra.Command) {
 	flag.SetCommonFlags(submitListCmd)
 
 	flag.SetTokenFlags(submitListCmd)
+	flag.SetSubmissionListFlags(submitListCmd)
 
 	rootCmd.AddCommand(submitListCmd)
 }
@@ -53,6 +54,7 @@ func processSubmitListCommand(command *cobra.Command, args []string) error {
 
 	// handle token
 	tokenFlagValues := flag.GetTokenFlagValues()
+	submissionListFlagValues := flag.GetSubmissionListFlagValues()
 	config := commons.GetConfig()
 
 	if len(tokenFlagValues.TicketString) > 0 {
@@ -70,14 +72,26 @@ func processSubmitListCommand(command *cobra.Command, args []string) error {
 	}
 
 	if len(config.Token) > 0 && len(config.TicketString) == 0 {
-		// handle orcid
-		orcID := commons.InputOrcID()
+		// orcID
+		orcID := ""
+		if len(submissionListFlagValues.OrcID) > 0 {
+			orcID = submissionListFlagValues.OrcID
+		} else {
+			orcID = commons.InputOrcID()
+		}
 
 		// encrypt
-		newToken, err := commons.HMACStringSHA224(config.Token, orcID)
+		tokenBytes, err := commons.Base64Decode(config.Token)
+		if err != nil {
+			return xerrors.Errorf("failed to decode token using BASE64: %w", err)
+		}
+
+		newToken, err := commons.HMACStringSHA224(tokenBytes, orcID)
 		if err != nil {
 			return xerrors.Errorf("failed to encrypt token using SHA3-224 HMAC: %w", err)
 		}
+
+		logger.Debugf("encrypted token: %s", newToken)
 
 		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(newToken)
 		if err != nil {

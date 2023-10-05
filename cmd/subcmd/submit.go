@@ -194,7 +194,12 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 		}
 
 		// encrypt
-		newToken, err := commons.HMACStringSHA224(config.Token, orcID)
+		tokenBytes, err := commons.Base64Decode(config.Token)
+		if err != nil {
+			return xerrors.Errorf("failed to decode token using BASE64: %w", err)
+		}
+
+		newToken, err := commons.HMACStringSHA224(tokenBytes, orcID)
 		if err != nil {
 			return xerrors.Errorf("failed to encrypt token using SHA3-224 HMAC: %w", err)
 		}

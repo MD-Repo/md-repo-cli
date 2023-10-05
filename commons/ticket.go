@@ -16,7 +16,7 @@ type MDRepoTicket struct {
 }
 
 type MDRepoTicketObject struct {
-	TicketString string `json:"ticket"`
+	TicketString string `json:"tickets"`
 }
 
 func GetMDRepoTicketString(tickets []MDRepoTicket) (string, error) {
@@ -106,8 +106,18 @@ func GetMDRepoTicketStringFromToken(token string) (string, error) {
 	}
 
 	req.Body = io.NopCloser(strings.NewReader(token))
+	req.Header.Add("Accept", "*/*")
+	req.Header.Add("Content-Type", "text/plain")
+	req.ContentLength = int64(len(token))
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{}
+	transport := &http.Transport{
+		Proxy:              http.ProxyFromEnvironment,
+		DisableCompression: true,
+	}
+	client.Transport = transport
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", xerrors.Errorf("failed to perform http post to retrieve tickets: %w", err)
 	}

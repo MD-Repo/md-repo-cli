@@ -89,6 +89,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Invalid token!\n")
 		} else if errors.Is(err, commons.TokenNotProvidedError) {
 			fmt.Fprintf(os.Stderr, "Token not provided!\n")
+		} else if errors.Is(err, commons.SimulationNoNotMatchingError) {
+			fmt.Fprintf(os.Stderr, "Simulation number not match!\n")
+			fmt.Fprintf(os.Stderr, "> %s\n", err.Error())
+		} else if errors.Is(err, commons.InvalidOrcIDError) {
+			fmt.Fprintf(os.Stderr, "Invalid ORC-ID!\n")
 		} else {
 			fmt.Fprintf(os.Stderr, "Error: %s\nError Trace:\n  - %+v\n", err.Error(), err)
 		}

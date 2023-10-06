@@ -182,7 +182,7 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 				logger.Debugf("[%d] %s\n", sourceIdx+1, sourcePath)
 			}
 
-			return xerrors.Errorf("The number of simulations typed (%d) does not match the number of simulations we found (%d)", expectedSimulationNo, numSimulations)
+			return xerrors.Errorf("The number of simulations typed (%d) does not match the number of simulations we found (%d): %w", expectedSimulationNo, numSimulations, commons.SimulationNoNotMatchingError)
 		}
 	}
 
@@ -252,10 +252,15 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 
 	parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
 
+	includeFirstDir := false
+	if len(sourcePaths) > 1 {
+		includeFirstDir = true
+	}
+
 	for _, sourcePath := range sourcePaths {
 		logger.Debugf("submitting %s", sourcePath)
 
-		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, targetPath, targetPath, forceFlagValues.Force, parallelTransferFlagValues.SingleTread, true)
+		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, targetPath, targetPath, forceFlagValues.Force, parallelTransferFlagValues.SingleTread, includeFirstDir)
 		if err != nil {
 			return xerrors.Errorf("failed to submit %s to %s: %w", sourcePath, targetPath, err)
 		}

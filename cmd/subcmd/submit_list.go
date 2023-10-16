@@ -57,6 +57,7 @@ func processSubmitListCommand(command *cobra.Command, args []string) error {
 	submissionListFlagValues := flag.GetSubmissionListFlagValues()
 	config := commons.GetConfig()
 
+	// handle token
 	if len(tokenFlagValues.TicketString) > 0 {
 		config.TicketString = tokenFlagValues.TicketString
 	}
@@ -73,6 +74,7 @@ func processSubmitListCommand(command *cobra.Command, args []string) error {
 
 	if len(config.Token) > 0 && len(config.TicketString) == 0 {
 		// orcID
+		// override ORC-ID
 		orcID := ""
 		if len(submissionListFlagValues.OrcID) > 0 {
 			orcID = submissionListFlagValues.OrcID
@@ -263,9 +265,16 @@ func printSubmitListDataObjects(entries []*irodsclient_types.IRODSDataObject) {
 }
 
 func printSubmitListDataObject(entry *irodsclient_types.IRODSDataObject) {
-	for _, replica := range entry.Replicas {
-		printSubmitListTextGridRow(false, entry.Name, fmt.Sprintf("%d", entry.Size), replica.CheckSum, replica.ModifyTime)
-		break
+	if len(entry.Replicas) > 0 {
+		replica := entry.Replicas[0]
+
+		checksum := ""
+		if replica.Checksum != nil {
+			checksum = replica.Checksum.OriginalChecksum
+		}
+
+		printSubmitListTextGridRow(false, entry.Name, fmt.Sprintf("%d", entry.Size), checksum, replica.ModifyTime)
+
 	}
 }
 

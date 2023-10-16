@@ -10,6 +10,7 @@ import (
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/commons"
 	"github.com/cyverse/go-irodsclient/fs"
+	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	irodsclient_util "github.com/cyverse/go-irodsclient/irods/util"
 	"github.com/jedib0t/go-pretty/v6/progress"
 	log "github.com/sirupsen/logrus"
@@ -41,6 +42,10 @@ func AddSubmitCommand(rootCmd *cobra.Command) {
 func checkValidSourcePath(sourcePath string) error {
 	st, err := os.Stat(sourcePath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return irodsclient_types.NewFileNotFoundError(sourcePath)
+		}
+
 		return xerrors.Errorf("failed to stat source %s: %w", sourcePath, err)
 	}
 
@@ -75,6 +80,10 @@ func scanSourcePaths(sourcePaths []string) ([]string, string, error) {
 		// may have sub dirs?
 		st, stErr := os.Stat(sourcePath)
 		if stErr != nil {
+			if os.IsNotExist(err) {
+				return nil, "", irodsclient_types.NewFileNotFoundError(sourcePath)
+			}
+
 			return nil, "", err
 		}
 
@@ -204,6 +213,8 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 			return xerrors.Errorf("failed to encrypt token using SHA3-224 HMAC: %w", err)
 		}
 
+		logger.Debugf("encrypted token: %s", newToken)
+
 		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(newToken)
 		if err != nil {
 			return xerrors.Errorf("failed to read ticket from token: %w", err)
@@ -303,13 +314,23 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 
 	sourceStat, err := os.Stat(sourcePath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return irodsclient_types.NewFileNotFoundError(sourcePath)
+		}
+
 		return xerrors.Errorf("failed to stat %s: %w", sourcePath, err)
 	}
 
 	if !sourceStat.IsDir() {
 		// file
 		targetFilePath := commons.MakeTargetIRODSFilePath(filesystem, sourcePath, targetPath)
-		exist := commons.ExistsIRODSFile(filesystem, targetFilePath)
+		targetDirPath := commons.GetDir(targetFilePath)
+		_, err := commons.StatIRODSPath(filesystem, targetDirPath)
+		if err != nil {
+			return xerrors.Errorf("failed to stat dir %s: %w", targetDirPath, err)
+		}
+
+		fileExist := commons.ExistsIRODSFile(filesystem, targetFilePath)
 
 		putTask := func(job *commons.ParallelJob) error {
 			manager := job.GetManager()
@@ -338,7 +359,7 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 			return nil
 		}
 
-		md5hash, err := commons.HashLocalFileMD5(sourcePath)
+		hash, err := commons.HashLocalFile(sourcePath, "md5")
 		if err != nil {
 			return xerrors.Errorf("failed to get hash for %s: %w", sourcePath, err)
 		}
@@ -351,11 +372,11 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 		submitStatusEntry := commons.SubmitStatusEntry{
 			IRODSPath: targetFileRelPath, // store relative path
 			Size:      sourceStat.Size(),
-			MD5Hash:   md5hash,
+			MD5Hash:   hash,
 		}
 		submitStatusFile.AddFile(submitStatusEntry)
 
-		if exist {
+		if fileExist {
 			targetEntry, err := commons.StatIRODSPath(filesystem, targetFilePath)
 			if err != nil {
 				return xerrors.Errorf("failed to stat %s: %w", targetFilePath, err)
@@ -371,7 +392,7 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 				if targetEntry.Size == sourceStat.Size() {
 					if len(targetEntry.CheckSum) > 0 {
 						// compare hash
-						if md5hash == targetEntry.CheckSum {
+						if hash == targetEntry.CheckSum {
 							fmt.Printf("skip uploading file %s. The file with the same hash already exists!\n", targetFilePath)
 							return nil
 						}
@@ -391,6 +412,11 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 		logger.Debugf("scheduled local file upload %s to %s", sourcePath, targetFilePath)
 	} else {
 		// dir
+		_, err := commons.StatIRODSPath(filesystem, targetPath)
+		if err != nil {
+			return xerrors.Errorf("failed to stat dir %s: %w", targetPath, err)
+		}
+
 		logger.Debugf("uploading local directory %s to %s", sourcePath, targetPath)
 
 		entries, err := os.ReadDir(sourcePath)
@@ -416,7 +442,6 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 			}
 		}
 	}
-
 	return nil
 }
 

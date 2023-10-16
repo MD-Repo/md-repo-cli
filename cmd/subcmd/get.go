@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
+	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	irodsclient_util "github.com/cyverse/go-irodsclient/irods/util"
 	"github.com/jedib0t/go-pretty/v6/progress"
 
@@ -160,6 +161,15 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 
 	if sourceEntry.Type == irodsclient_fs.FileEntry {
 		targetFilePath := commons.MakeTargetLocalFilePath(sourcePath, targetPath)
+		targetDirPath := commons.GetDir(targetFilePath)
+		_, err := os.Stat(targetDirPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return irodsclient_types.NewFileNotFoundError(targetDirPath)
+			}
+
+			return xerrors.Errorf("failed to stat dir %s: %w", targetDirPath, err)
+		}
 
 		exist := false
 		targetEntry, err := os.Stat(targetFilePath)
@@ -204,12 +214,12 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 				if targetEntry.Size() == sourceEntry.Size {
 					if len(sourceEntry.CheckSum) > 0 {
 						// compare hash
-						md5hash, err := commons.HashLocalFileMD5(targetFilePath)
+						hash, err := commons.HashLocalFile(targetFilePath, sourceEntry.CheckSumAlgorithm)
 						if err != nil {
 							return xerrors.Errorf("failed to get hash of %s: %w", targetFilePath, err)
 						}
 
-						if sourceEntry.CheckSum == md5hash {
+						if sourceEntry.CheckSum == hash {
 							fmt.Printf("skip downloading file %s. The file with the same hash already exists!\n", targetFilePath)
 							return nil
 						}
@@ -229,6 +239,15 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 		logger.Debugf("scheduled file download %s to %s", sourcePath, targetFilePath)
 	} else {
 		// dir
+		_, err := os.Stat(targetPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return irodsclient_types.NewFileNotFoundError(targetPath)
+			}
+
+			return xerrors.Errorf("failed to stat dir %s: %w", targetPath, err)
+		}
+
 		logger.Debugf("downloading dir %s to %s", sourcePath, targetPath)
 
 		entries, err := commons.ListIRODSDir(filesystem, sourceEntry.Path)

@@ -7,7 +7,6 @@ import (
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/cmd/subcmd"
-	"github.com/MD-Repo/md-repo-cli/commons"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -79,25 +78,38 @@ func main() {
 	if err != nil {
 		logger.Errorf("%+v", err)
 
-		if irodsclient_types.IsConnectionConfigError(err) || irodsclient_types.IsConnectionError(err) {
+		if os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "File or dir not found!\n")
+		} else if irodsclient_types.IsConnectionConfigError(err) {
+			fmt.Fprintf(os.Stderr, "Failed to establish a connection to MD-Repo data server!\n")
+		} else if irodsclient_types.IsConnectionError(err) {
 			fmt.Fprintf(os.Stderr, "Failed to establish a connection to MD-Repo data server!\n")
 		} else if irodsclient_types.IsAuthError(err) {
 			fmt.Fprintf(os.Stderr, "Authentication failed!\n")
-		} else if errors.Is(err, commons.InvalidTicketError) {
-			fmt.Fprintf(os.Stderr, "Invalid ticket string!\n")
-		} else if errors.Is(err, commons.InvalidTokenError) {
-			fmt.Fprintf(os.Stderr, "Invalid token!\n")
-		} else if errors.Is(err, commons.TokenNotProvidedError) {
-			fmt.Fprintf(os.Stderr, "Token not provided!\n")
-		} else if errors.Is(err, commons.SimulationNoNotMatchingError) {
-			fmt.Fprintf(os.Stderr, "Simulation number not match!\n")
-			fmt.Fprintf(os.Stderr, "> %s\n", err.Error())
-		} else if errors.Is(err, commons.InvalidOrcIDError) {
-			fmt.Fprintf(os.Stderr, "Invalid ORC-ID!\n")
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %s\nError Trace:\n  - %+v\n", err.Error(), err)
+		} else if irodsclient_types.IsFileNotFoundError(err) {
+			var fileNotFoundError *irodsclient_types.FileNotFoundError
+			if errors.As(err, &fileNotFoundError) {
+				fmt.Fprintf(os.Stderr, "File or dir '%s' not found!\n", fileNotFoundError.Path)
+			} else {
+				fmt.Fprintf(os.Stderr, "File or dir not found!\n")
+			}
+		} else if irodsclient_types.IsCollectionNotEmptyError(err) {
+			var collectionNotEmptyError *irodsclient_types.CollectionNotEmptyError
+			if errors.As(err, &collectionNotEmptyError) {
+				fmt.Fprintf(os.Stderr, "Dir '%s' not empty!\n", collectionNotEmptyError.Path)
+			} else {
+				fmt.Fprintf(os.Stderr, "Dir not empty!\n")
+			}
+		} else if irodsclient_types.IsIRODSError(err) {
+			var irodsError *irodsclient_types.IRODSError
+			if errors.As(err, &irodsError) {
+				fmt.Fprintf(os.Stderr, "MD-Repo data server error: %s\n", irodsError.Error())
+			} else {
+				fmt.Fprintf(os.Stderr, "MD-Repo data server error!\n")
+			}
 		}
 
+		fmt.Fprintf(os.Stderr, "\nError Trace:\n  - %+v\n", err)
 		os.Exit(1)
 	}
 }

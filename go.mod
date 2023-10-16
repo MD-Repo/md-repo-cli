@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/creativeprojects/go-selfupdate v1.1.0
-	github.com/cyverse/go-irodsclient v0.12.8-0.20230814221328-5b3ecb4dc4eb
+	github.com/cyverse/go-irodsclient v0.12.14
 	github.com/jedib0t/go-pretty/v6 v6.4.6
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.5.0

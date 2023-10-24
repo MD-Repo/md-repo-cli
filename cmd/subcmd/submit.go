@@ -3,7 +3,6 @@ package subcmd
 import (
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/progress"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
 	"golang.org/x/xerrors"
 )
 
@@ -32,7 +32,7 @@ func AddSubmitCommand(rootCmd *cobra.Command) {
 
 	flag.SetTokenFlags(submitCmd)
 	flag.SetForceFlags(submitCmd, true)
-	flag.SetParallelTransferFlags(submitCmd, true)
+	flag.SetParallelTransferFlags(submitCmd)
 	flag.SetProgressFlags(submitCmd)
 	flag.SetRetryFlags(submitCmd)
 
@@ -54,13 +54,24 @@ func checkValidSourcePath(sourcePath string) error {
 	}
 
 	// check if source path has metadata in it
-	if commons.HasSubmitMetadataInDir(sourcePath) {
-		// found
-		return nil
+	if !commons.HasSubmitMetadataInDir(sourcePath) {
+		// metadata path not exist?
+		return xerrors.Errorf("source %s must have submit metadata", sourcePath)
 	}
 
-	// metadata path not exist?
-	return xerrors.Errorf("invalid metadata dir %s", sourcePath)
+	entries, err := os.ReadDir(sourcePath)
+	if err != nil {
+		return xerrors.Errorf("failed to readdir source %s: %w", sourcePath, err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			// found dir
+			return xerrors.Errorf("source %s has sub directory %s", sourcePath, entry.Name())
+		}
+	}
+
+	return nil
 }
 
 // scanSourcePaths scans source paths and return valid sources only
@@ -88,7 +99,7 @@ func scanSourcePaths(sourcePaths []string) ([]string, string, error) {
 		}
 
 		if !st.IsDir() {
-			return nil, "", err
+			return nil, "", xerrors.Errorf("source %s is file", sourcePath)
 		}
 
 		dirEntries, readErr := os.ReadDir(sourcePath)
@@ -105,6 +116,9 @@ func scanSourcePaths(sourcePaths []string) ([]string, string, error) {
 			}
 		}
 	}
+
+	// sort source paths by name to match to tickets always in the same order
+	slices.Sort(foundSourcePaths)
 
 	orcIDFound := ""
 	for _, foundSourcePath := range foundSourcePaths {
@@ -150,6 +164,9 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 	progressFlagValues := flag.GetProgressFlagValues()
 	retryFlagValues := flag.GetRetryFlagValues()
 	submissionFlagValues := flag.GetSubmissionFlagValues()
+
+	maxConnectionNum := parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
+
 	config := commons.GetConfig()
 
 	// handle token
@@ -182,16 +199,15 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 			expectedSimulationNo = commons.InputSimulationNo()
 		}
 
-		numSimulations := len(sourcePaths)
-		if expectedSimulationNo != numSimulations {
-			logger.Debugf("we found %d simulations, but expected %d simulations", numSimulations, expectedSimulationNo)
+		if expectedSimulationNo != len(sourcePaths) {
+			logger.Debugf("we found %d simulations, but expected %d simulations", len(sourcePaths), expectedSimulationNo)
 
 			logger.Debugf("the simulations we found are:")
 			for sourceIdx, sourcePath := range sourcePaths {
 				logger.Debugf("[%d] %s\n", sourceIdx+1, sourcePath)
 			}
 
-			return xerrors.Errorf("The number of simulations typed (%d) does not match the number of simulations we found (%d): %w", expectedSimulationNo, numSimulations, commons.SimulationNoNotMatchingError)
+			return xerrors.Errorf("The number of simulations typed (%d) does not match the number of simulations we found (%d): %w", expectedSimulationNo, len(sourcePaths), commons.SimulationNoNotMatchingError)
 		}
 	}
 
@@ -225,8 +241,6 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 		return commons.TokenNotProvidedError
 	}
 
-	maxConnectionNum := parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
-
 	if retryFlagValues.RetryNumber > 0 && !retryFlagValues.RetryChild {
 		err = commons.RunWithRetry(retryFlagValues.RetryNumber, retryFlagValues.RetryIntervalSeconds)
 		if err != nil {
@@ -235,76 +249,84 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 		return nil
 	}
 
-	mdRepoTicket, err := commons.GetMDRepoTicketFromString(config.TicketString)
+	mdRepoTickets, err := commons.GetMDRepoTicketsFromString(config.TicketString)
 	if err != nil {
-		return xerrors.Errorf("failed to retrieve ticket: %w", err)
+		return xerrors.Errorf("failed to retrieve tickets: %w", err)
 	}
 
-	// Create a file system
-	account, err := commons.GetAccount(&mdRepoTicket)
-	if err != nil {
-		return xerrors.Errorf("failed to get iRODS Account: %w", err)
+	if len(mdRepoTickets) != len(sourcePaths) {
+		logger.Debugf("we found %d simulations, but we got %d tokens", len(mdRepoTickets), len(sourcePaths))
 	}
 
-	filesystem, err := commons.GetIRODSFSClientAdvanced(account, maxConnectionNum, parallelTransferFlagValues.TCPBufferSize)
-	if err != nil {
-		return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
-	}
+	for ticketIdx, mdRepoTicket := range mdRepoTickets {
+		sourcePath := sourcePaths[ticketIdx]
+		targetPath := commons.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
 
-	defer filesystem.Release()
+		// display
+		logger.Debugf("submission iRODS ticket: %s", mdRepoTicket.IRODSTicket)
+		logger.Debugf("submission %s => %s", sourcePath, targetPath)
 
-	targetPath := commons.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
-
-	// display
-	logger.Debugf("submission iRODS ticket: %s", mdRepoTicket.IRODSTicket)
-	logger.Debugf("submission path: %s", targetPath)
-
-	submitStatusFile := commons.NewSubmitStatusFile()
-
-	parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
-
-	includeFirstDir := false
-	if len(sourcePaths) > 1 {
-		includeFirstDir = true
-	}
-
-	for _, sourcePath := range sourcePaths {
-		logger.Debugf("submitting %s", sourcePath)
-
-		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, targetPath, targetPath, forceFlagValues.Force, parallelTransferFlagValues.SingleTread, includeFirstDir)
+		// Create a file system
+		account, err := commons.GetAccount(&mdRepoTicket)
 		if err != nil {
+			return xerrors.Errorf("failed to get iRODS Account: %w", err)
+		}
+
+		filesystem, err := commons.GetIRODSFSClientAdvanced(account, maxConnectionNum, parallelTransferFlagValues.TCPBufferSize)
+		if err != nil {
+			return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
+		}
+
+		submitStatusFile := commons.NewSubmitStatusFile()
+
+		parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
+		parallelJobManager.Start()
+
+		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, targetPath, forceFlagValues.Force)
+		if err != nil {
+			submitStatusFile.SetErrored()
+			submitStatusFile.CreateStatusFile(filesystem, targetPath)
+			filesystem.Release()
+
 			return xerrors.Errorf("failed to submit %s to %s: %w", sourcePath, targetPath, err)
 		}
-	}
 
-	parallelJobManager.DoneScheduling()
+		parallelJobManager.DoneScheduling()
 
-	// status file
-	submitStatusFile.SetInProgress()
-	err = submitStatusFile.CreateStatusFile(filesystem, targetPath)
-	if err != nil {
-		return xerrors.Errorf("failed to create status file on %s: %w", targetPath, err)
-	}
+		// status file
+		submitStatusFile.SetInProgress()
+		err = submitStatusFile.CreateStatusFile(filesystem, targetPath)
+		if err != nil {
+			filesystem.Release()
 
-	parallelJobManager.Start()
-	err = parallelJobManager.Wait()
-	if err != nil {
-		submitStatusFile.SetErrored()
-		defer submitStatusFile.CreateStatusFile(filesystem, targetPath)
-		return xerrors.Errorf("failed to perform parallel jobs: %w", err)
-	}
+			return xerrors.Errorf("failed to create status file on %s: %w", targetPath, err)
+		}
 
-	// status file
-	submitStatusFile.SetCompleted()
-	err = submitStatusFile.CreateStatusFile(filesystem, targetPath)
-	if err != nil {
-		return xerrors.Errorf("failed to create status file on %s: %w", targetPath, err)
+		err = parallelJobManager.Wait()
+		if err != nil {
+			submitStatusFile.SetErrored()
+			submitStatusFile.CreateStatusFile(filesystem, targetPath)
+			filesystem.Release()
+
+			return xerrors.Errorf("failed to perform parallel jobs: %w", err)
+		}
+
+		// status file
+		submitStatusFile.SetCompleted()
+		err = submitStatusFile.CreateStatusFile(filesystem, targetPath)
+		if err != nil {
+			filesystem.Release()
+
+			return xerrors.Errorf("failed to create status file on %s: %w", targetPath, err)
+		}
+
+		filesystem.Release()
 	}
 
 	return nil
 }
 
-func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile *commons.SubmitStatusFile, sourcePath string, targetRootPath string, targetPath string, force bool, singleThreaded bool, includeFirstDir bool) error {
+func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile *commons.SubmitStatusFile, sourcePath string, targetPath string, force bool) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "main",
 		"function": "submitOne",
@@ -324,13 +346,16 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 	if !sourceStat.IsDir() {
 		// file
 		targetFilePath := commons.MakeTargetIRODSFilePath(filesystem, sourcePath, targetPath)
-		targetDirPath := commons.GetDir(targetFilePath)
-		_, err := commons.StatIRODSPath(filesystem, targetDirPath)
-		if err != nil {
-			return xerrors.Errorf("failed to stat dir %s: %w", targetDirPath, err)
-		}
 
-		fileExist := commons.ExistsIRODSFile(filesystem, targetFilePath)
+		fileExist := false
+		targetEntry, err := filesystem.StatFile(targetFilePath)
+		if err != nil {
+			if !irodsclient_types.IsFileNotFoundError(err) {
+				return xerrors.Errorf("failed to stat %s: %w", targetFilePath, err)
+			}
+		} else {
+			fileExist = true
+		}
 
 		putTask := func(job *commons.ParallelJob) error {
 			manager := job.GetManager()
@@ -343,12 +368,7 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 			job.Progress(0, sourceStat.Size(), false)
 
 			logger.Debugf("uploading file %s to %s", sourcePath, targetFilePath)
-			if singleThreaded {
-				err = fs.UploadFile(sourcePath, targetFilePath, "", false, callbackPut)
-			} else {
-				err = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, callbackPut)
-			}
-
+			err = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, callbackPut)
 			if err != nil {
 				job.Progress(-1, sourceStat.Size(), true)
 				return xerrors.Errorf("failed to upload %s to %s: %w", sourcePath, targetFilePath, err)
@@ -365,8 +385,8 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 		}
 
 		targetFileRelPath := targetFilePath
-		if strings.HasPrefix(targetFilePath, fmt.Sprintf("%s/", targetRootPath)) {
-			targetFileRelPath = targetFilePath[len(targetRootPath)+1:]
+		if strings.HasPrefix(targetFilePath, fmt.Sprintf("%s/", targetPath)) {
+			targetFileRelPath = targetFilePath[len(targetPath)+1:]
 		}
 
 		submitStatusEntry := commons.SubmitStatusEntry{
@@ -377,18 +397,7 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 		submitStatusFile.AddFile(submitStatusEntry)
 
 		if fileExist {
-			targetEntry, err := commons.StatIRODSPath(filesystem, targetFilePath)
-			if err != nil {
-				return xerrors.Errorf("failed to stat %s: %w", targetFilePath, err)
-			}
-
-			if force {
-				logger.Debugf("deleting existing file %s", targetFilePath)
-				err := filesystem.RemoveFile(targetFilePath, true)
-				if err != nil {
-					return xerrors.Errorf("failed to remove %s: %w", targetFilePath, err)
-				}
-			} else {
+			if !force {
 				if targetEntry.Size == sourceStat.Size() {
 					if len(targetEntry.CheckSum) > 0 {
 						// compare hash
@@ -398,21 +407,15 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 						}
 					}
 				}
-
-				logger.Debugf("deleting existing file %s", targetFilePath)
-				err := filesystem.RemoveFile(targetFilePath, true)
-				if err != nil {
-					return xerrors.Errorf("failed to remove %s: %w", targetFilePath, err)
-				}
 			}
 		}
 
-		threadsRequired := computeThreadsRequiredForSubmit(filesystem, singleThreaded, sourceStat.Size())
+		threadsRequired := computeThreadsRequiredForSubmit(filesystem, sourceStat.Size())
 		parallelJobManager.Schedule(sourcePath, putTask, threadsRequired, progress.UnitsBytes)
 		logger.Debugf("scheduled local file upload %s to %s", sourcePath, targetFilePath)
 	} else {
 		// dir
-		_, err := commons.StatIRODSPath(filesystem, targetPath)
+		_, err := filesystem.Stat(targetPath)
 		if err != nil {
 			return xerrors.Errorf("failed to stat dir %s: %w", targetPath, err)
 		}
@@ -425,31 +428,18 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 		}
 
 		// make target dir
-		targetDir := targetPath
-		if includeFirstDir {
-			targetDir = path.Join(targetPath, filepath.Base(sourcePath))
-			err = filesystem.MakeDir(targetDir, true)
-			if err != nil {
-				return xerrors.Errorf("failed to make dir %s: %w", targetDir, err)
-			}
-		}
-
 		for _, entryInDir := range entries {
 			newSourcePath := filepath.Join(sourcePath, entryInDir.Name())
-			err = submitOne(parallelJobManager, submitStatusFile, newSourcePath, targetRootPath, targetDir, force, singleThreaded, true)
+			err = submitOne(parallelJobManager, submitStatusFile, newSourcePath, targetPath, force)
 			if err != nil {
-				return xerrors.Errorf("failed to perform put %s to %s: %w", newSourcePath, targetDir, err)
+				return xerrors.Errorf("failed to perform put %s to %s: %w", newSourcePath, targetPath, err)
 			}
 		}
 	}
 	return nil
 }
 
-func computeThreadsRequiredForSubmit(fs *fs.FileSystem, singleThreaded bool, size int64) int {
-	if singleThreaded {
-		return 1
-	}
-
+func computeThreadsRequiredForSubmit(fs *fs.FileSystem, size int64) int {
 	if fs.SupportParallelUpload() {
 		return irodsclient_util.GetNumTasksForParallelTransfer(size)
 	}

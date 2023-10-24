@@ -32,7 +32,7 @@ func AddGetCommand(rootCmd *cobra.Command) {
 
 	flag.SetTokenFlags(getCmd)
 	flag.SetForceFlags(getCmd, false)
-	flag.SetParallelTransferFlags(getCmd, false)
+	flag.SetParallelTransferFlags(getCmd)
 	flag.SetProgressFlags(getCmd)
 	flag.SetRetryFlags(getCmd)
 
@@ -107,6 +107,13 @@ func processGetCommand(command *cobra.Command, args []string) error {
 
 	// we may further optimize this by run it parallel
 	for _, mdRepoTicket := range mdRepoTickets {
+		sourcePath := commons.MakeIRODSReleasePath(mdRepoTicket.IRODSDataPath)
+		targetPath = commons.MakeLocalPath(targetPath)
+
+		// display
+		logger.Debugf("download iRODS ticket: %s", mdRepoTicket.IRODSTicket)
+		logger.Debugf("download %s => %s", sourcePath, targetPath)
+
 		// Create a file system
 		account, err := commons.GetAccount(&mdRepoTicket)
 		if err != nil {
@@ -117,13 +124,6 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		if err != nil {
 			return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
 		}
-
-		sourcePath := commons.MakeIRODSReleasePath(mdRepoTicket.IRODSDataPath)
-		targetPath = commons.MakeLocalPath(targetPath)
-
-		// display
-		logger.Debugf("download iRODS ticket: %s", mdRepoTicket.IRODSTicket)
-		logger.Debugf("download path: %s", sourcePath)
 
 		parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
 		parallelJobManager.Start()
@@ -154,7 +154,7 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 
 	filesystem := parallelJobManager.GetFilesystem()
 
-	sourceEntry, err := commons.StatIRODSPath(filesystem, sourcePath)
+	sourceEntry, err := filesystem.Stat(sourcePath)
 	if err != nil {
 		return xerrors.Errorf("failed to stat %s: %w", sourcePath, err)
 	}
@@ -171,14 +171,14 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 			return xerrors.Errorf("failed to stat dir %s: %w", targetDirPath, err)
 		}
 
-		exist := false
+		fileExist := false
 		targetEntry, err := os.Stat(targetFilePath)
 		if err != nil {
 			if !os.IsNotExist(err) {
 				return xerrors.Errorf("failed to stat %s: %w", targetFilePath, err)
 			}
 		} else {
-			exist = true
+			fileExist = true
 		}
 
 		getTask := func(job *commons.ParallelJob) error {
@@ -203,14 +203,8 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 			return nil
 		}
 
-		if exist {
-			if force {
-				logger.Debugf("deleting existing file %s", targetFilePath)
-				err := os.Remove(targetFilePath)
-				if err != nil {
-					return xerrors.Errorf("failed to remove %s: %w", targetFilePath, err)
-				}
-			} else {
+		if fileExist {
+			if !force {
 				if targetEntry.Size() == sourceEntry.Size {
 					if len(sourceEntry.CheckSum) > 0 {
 						// compare hash
@@ -224,12 +218,6 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 							return nil
 						}
 					}
-				}
-
-				logger.Debugf("deleting existing file %s", targetFilePath)
-				err := os.Remove(targetFilePath)
-				if err != nil {
-					return xerrors.Errorf("failed to remove %s: %w", targetFilePath, err)
 				}
 			}
 		}
@@ -250,7 +238,7 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 
 		logger.Debugf("downloading dir %s to %s", sourcePath, targetPath)
 
-		entries, err := commons.ListIRODSDir(filesystem, sourceEntry.Path)
+		entries, err := filesystem.List(sourceEntry.Path)
 		if err != nil {
 			return xerrors.Errorf("failed to list dir %s: %w", sourceEntry.Path, err)
 		}

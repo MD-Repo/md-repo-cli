@@ -41,9 +41,12 @@ func MakeLocalPath(localPath string) string {
 }
 
 func MakeTargetIRODSFilePath(filesystem *irodsclient_fs.FileSystem, source string, target string) string {
-	// make full file name for target
-	filename := GetBasename(source)
-	return path.Join(target, filename)
+	if filesystem.ExistsDir(target) {
+		// make full file name for target
+		filename := GetBasename(source)
+		return path.Join(target, filename)
+	}
+	return target
 }
 
 func MakeTargetLocalFilePath(source string, target string) string {
@@ -69,6 +72,9 @@ func GetFileExtension(p string) string {
 }
 
 func GetBasename(p string) string {
+	p = strings.TrimRight(p, string(os.PathSeparator))
+	p = strings.TrimRight(p, "/")
+
 	idx1 := strings.LastIndex(p, string(os.PathSeparator))
 	idx2 := strings.LastIndex(p, "/")
 

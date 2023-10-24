@@ -16,13 +16,9 @@ var (
 	parallelTransferFlagValues ParallelTransferFlagValues
 )
 
-func SetParallelTransferFlags(command *cobra.Command, showSingleThread bool) {
+func SetParallelTransferFlags(command *cobra.Command) {
 	command.Flags().IntVar(&parallelTransferFlagValues.ThreadNumber, "thread_num", commons.TransferTreadNumDefault, "Specify the number of transfer threads")
 	command.Flags().StringVar(&parallelTransferFlagValues.tcpBufferSizeInput, "tcp_buffer_size", commons.TcpBufferSizeStringDefault, "Specify TCP socket buffer size")
-
-	if showSingleThread {
-		command.Flags().BoolVar(&parallelTransferFlagValues.SingleTread, "single_threaded", false, "Transfer a file using a single thread")
-	}
 }
 
 func GetParallelTransferFlagValues() *ParallelTransferFlagValues {

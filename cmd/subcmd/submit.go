@@ -75,7 +75,7 @@ func checkValidSourcePath(sourcePath string) error {
 }
 
 // scanSourcePaths scans source paths and return valid sources only
-func scanSourcePaths(sourcePaths []string) ([]string, string, error) {
+func scanSourcePaths(sourcePaths []string, orcID string) ([]string, string, error) {
 	foundSourcePaths := []string{}
 
 	for _, sourcePath := range sourcePaths {
@@ -120,23 +120,28 @@ func scanSourcePaths(sourcePaths []string) ([]string, string, error) {
 	// sort source paths by name to match to tickets always in the same order
 	slices.Sort(foundSourcePaths)
 
+	// if orcID is given, override the orcID
+	if len(orcID) > 0 {
+		return foundSourcePaths, orcID, nil
+	}
+
 	orcIDFound := ""
 	for _, foundSourcePath := range foundSourcePaths {
-		orcID, err := commons.ReadOrcIDFromSubmitMetadataFileInDir(foundSourcePath)
+		myOrcID, err := commons.ReadOrcIDFromSubmitMetadataFileInDir(foundSourcePath)
 		if err != nil {
 			return nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %s: %w", foundSourcePath, err)
 		}
 
-		if len(orcID) == 0 {
+		if len(myOrcID) == 0 {
 			return nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %s: %w", foundSourcePath, commons.InvalidOrcIDError)
 		}
 
 		if len(orcIDFound) == 0 {
-			orcIDFound = orcID
+			orcIDFound = myOrcID
 		}
 
-		if orcIDFound != orcID {
-			return nil, "", xerrors.Errorf("Lead Contributor's ORC-ID mismatch for %s, expected %s, but got %s: %w", foundSourcePath, orcIDFound, orcID, commons.InvalidOrcIDError)
+		if orcIDFound != myOrcID {
+			return nil, "", xerrors.Errorf("Lead Contributor's ORC-ID mismatch for %s, expected %s, but got %s: %w", foundSourcePath, orcIDFound, myOrcID, commons.InvalidOrcIDError)
 		}
 	}
 
@@ -185,7 +190,7 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 	}
 
 	sourcePaths := args[0:]
-	sourcePaths, orcID, err := scanSourcePaths(sourcePaths)
+	sourcePaths, orcID, err := scanSourcePaths(sourcePaths, submissionFlagValues.OrcID)
 	if err != nil {
 		return xerrors.Errorf("failed to scan source paths: %w", err)
 	}
@@ -212,12 +217,6 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 	}
 
 	if len(config.Token) > 0 && len(config.TicketString) == 0 {
-		// orcID
-		// override ORC-ID
-		if len(submissionFlagValues.OrcID) > 0 {
-			orcID = submissionFlagValues.OrcID
-		}
-
 		// encrypt
 		tokenBytes, err := commons.Base64Decode(config.Token)
 		if err != nil {

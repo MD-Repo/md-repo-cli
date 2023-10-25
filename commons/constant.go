@@ -28,7 +28,6 @@ const (
 
 	mdRepoGetTicketApiUrl string = "http://128.196.65.71:8000/api/get_ticket"
 
-	submissionStatusFilename          string = "mdrepo-submission.%s.json"
-	submissionCompletedStatusFilename string = "mdrepo-submission.json"
-	SubmissionMetadataFilename        string = "mdrepo-metadata.toml"
+	submissionStatusFilename   string = "mdrepo-submission.%s.json"
+	SubmissionMetadataFilename string = "mdrepo-metadata.toml"
 )

@@ -107,10 +107,6 @@ func getStatusFilename(status SubmitStatus) string {
 	return fmt.Sprintf(submissionStatusFilename, status)
 }
 
-func getCompletedStatusFilename() string {
-	return submissionCompletedStatusFilename
-}
-
 func (s *SubmitStatusFile) CreateStatusFile(filesystem *fs.FileSystem, dataRootPath string) error {
 	statusFileName := s.GetStatusFilename()
 	statusFilePath := MakeTargetIRODSFilePath(filesystem, statusFileName, dataRootPath)
@@ -146,16 +142,6 @@ func (s *SubmitStatusFile) CreateStatusFile(filesystem *fs.FileSystem, dataRootP
 	err = filesystem.UploadFileFromBuffer(jsonBytesBuffer, statusFilePath, "", false, nil)
 	if err != nil {
 		return xerrors.Errorf("failed to create submit status file %s: %w", statusFilePath, err)
-	}
-
-	if s.Status == SubmitStatusCompleted {
-		// create a completed status file
-		completedStatusFileName := getCompletedStatusFilename()
-		completedStatusFilePath := MakeTargetIRODSFilePath(filesystem, completedStatusFileName, dataRootPath)
-		err = filesystem.UploadFileFromBuffer(jsonBytesBuffer, completedStatusFilePath, "", false, nil)
-		if err != nil {
-			return xerrors.Errorf("failed to create submit status file %s: %w", completedStatusFilePath, err)
-		}
 	}
 
 	return nil

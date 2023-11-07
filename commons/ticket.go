@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/xerrors"
 )
 
@@ -99,8 +100,24 @@ func isAsciiString(str string) bool {
 	return true
 }
 
-func GetMDRepoTicketStringFromToken(token string) (string, error) {
-	req, err := http.NewRequest("POST", mdRepoGetTicketApiURL, nil)
+func GetMDRepoTicketStringFromToken(serviceURL string, token string) (string, error) {
+	logger := log.WithFields(log.Fields{
+		"package":  "commons",
+		"function": "GetMDRepoTicketStringFromToken",
+	})
+
+	apiURL := mdRepoURL + mdRepoGetTicketApi
+	if len(serviceURL) > 0 {
+		if !strings.HasPrefix(serviceURL, "http") {
+			return "", xerrors.Errorf("failed to make API endpoint URL from non-http/s URL '%s'", serviceURL)
+		}
+
+		apiURL = strings.TrimRight(serviceURL, "/") + mdRepoGetTicketApi
+	}
+
+	logger.Debugf("Requesting to API server at '%s'", apiURL)
+
+	req, err := http.NewRequest("POST", apiURL, nil)
 	if err != nil {
 		return "", xerrors.Errorf("failed to create a new request to retrieve tickets: %w", err)
 	}

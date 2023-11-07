@@ -80,7 +80,7 @@ func processGetCommand(command *cobra.Command, args []string) error {
 	}
 
 	if len(config.Token) > 0 && len(config.TicketString) == 0 {
-		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(config.Token)
+		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(tokenFlagValues.ServiceURL, config.Token)
 		if err != nil {
 			return xerrors.Errorf("failed to read ticket from token: %w", err)
 		}

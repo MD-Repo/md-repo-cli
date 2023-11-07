@@ -27,8 +27,8 @@ const (
 	mdRepoReleasePath string = mdRepoHome + "/release"
 
 	//mdRepoURL string = "http://128.196.65.71:8000"
-	mdRepoURL             string = "https://mdrepo.org"
-	mdRepoGetTicketApiURL string = mdRepoURL + "/api/v1/get_ticket"
+	mdRepoURL          string = "https://mdrepo.org"
+	mdRepoGetTicketApi string = "/api/v1/get_ticket"
 
 	submissionStatusFilename   string = "mdrepo-submission.%s.json"
 	SubmissionMetadataFilename string = "mdrepo-metadata.toml"

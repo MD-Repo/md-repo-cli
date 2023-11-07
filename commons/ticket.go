@@ -100,7 +100,7 @@ func isAsciiString(str string) bool {
 }
 
 func GetMDRepoTicketStringFromToken(token string) (string, error) {
-	req, err := http.NewRequest("POST", mdRepoGetTicketApiUrl, nil)
+	req, err := http.NewRequest("POST", mdRepoGetTicketApiURL, nil)
 	if err != nil {
 		return "", xerrors.Errorf("failed to create a new request to retrieve tickets: %w", err)
 	}

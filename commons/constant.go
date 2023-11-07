@@ -22,11 +22,13 @@ const (
 	mdRepoUser         string = "md-uploader"
 	mdRepoUserPassword string = ""
 
-	mdRepoHome        string = "/" + mdRepoZone + "/home/md-dev"
+	mdRepoHome        string = "/" + mdRepoZone + "/shared/mdrepo"
 	mdRepoLandingPath string = mdRepoHome + "/landing"
 	mdRepoReleasePath string = mdRepoHome + "/release"
 
-	mdRepoGetTicketApiUrl string = "http://128.196.65.71:8000/api/v1/get_ticket"
+	//mdRepoURL string = "http://128.196.65.71:8000"
+	mdRepoURL             string = "https://mdrepo.org"
+	mdRepoGetTicketApiURL string = mdRepoURL + "/api/v1/get_ticket"
 
 	submissionStatusFilename   string = "mdrepo-submission.%s.json"
 	SubmissionMetadataFilename string = "mdrepo-metadata.toml"

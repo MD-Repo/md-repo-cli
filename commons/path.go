@@ -10,8 +10,8 @@ import (
 )
 
 func MakeIRODSLandingPath(irodsPath string) string {
-	if strings.HasPrefix(irodsPath, mdRepoLandingPath) {
-		// clean
+	if strings.HasPrefix(irodsPath, "/") {
+		// absolute path
 		return path.Clean(irodsPath)
 	}
 
@@ -21,8 +21,8 @@ func MakeIRODSLandingPath(irodsPath string) string {
 }
 
 func MakeIRODSReleasePath(irodsPath string) string {
-	if strings.HasPrefix(irodsPath, mdRepoReleasePath) {
-		// clean
+	if strings.HasPrefix(irodsPath, "/") {
+		// absolute path
 		return path.Clean(irodsPath)
 	}
 

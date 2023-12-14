@@ -2,10 +2,13 @@ package commons
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/xerrors"
@@ -100,6 +103,25 @@ func isAsciiString(str string) bool {
 	return true
 }
 
+func GetMDRepoTicketStringFromTokenWithRetry(serviceURL string, token string, retry int, retryInterval time.Duration) (string, error) {
+	for i := 0; i < retry; i++ {
+		ticketString, err := GetMDRepoTicketStringFromToken(serviceURL, token)
+		if err != nil {
+			if !errors.Is(err, TicketNotReadyError) {
+				return ticketString, err
+			}
+
+			// retry
+			time.Sleep(retryInterval)
+			fmt.Fprintf(os.Stderr, "Ticket generation is not completed yet. We will wait %s and retry.\n", retryInterval.String())
+		} else {
+			return ticketString, nil
+		}
+	}
+
+	return "", xerrors.Errorf("failed to retrieve tickets from token after %d retries", retry)
+}
+
 func GetMDRepoTicketStringFromToken(serviceURL string, token string) (string, error) {
 	logger := log.WithFields(log.Fields{
 		"package":  "commons",
@@ -145,7 +167,11 @@ func GetMDRepoTicketStringFromToken(serviceURL string, token string) (string, er
 		return "", xerrors.Errorf("failed to retrieve tickets from token, not exist: %w", InvalidTokenError)
 	}
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode == 102 || resp.StatusCode == 503 {
+		return "", TicketNotReadyError
+	}
+
+	if resp.StatusCode != 200 {
 		return "", xerrors.Errorf("failed to retrieve tickets from token, http error %s", resp.Status)
 	}
 

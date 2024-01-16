@@ -55,6 +55,7 @@ func (s *SubmitStatus) UnmarshalJSON(b []byte) error {
 type SubmitStatusFile struct {
 	TotalFileNumer int64               `json:"total_filenum"`
 	TotalFileSize  int64               `json:"total_filesize"`
+	Token          string              `json:"token"`
 	Status         SubmitStatus        `json:"status"`
 	Files          []SubmitStatusEntry `json:"files"`
 	Time           time.Time           `json:"time"`
@@ -64,6 +65,7 @@ func NewSubmitStatusFile() *SubmitStatusFile {
 	return &SubmitStatusFile{
 		TotalFileNumer: 0,
 		TotalFileSize:  0,
+		Token:          "",
 		Status:         SubmitStatusUnknown,
 		Files:          []SubmitStatusEntry{},
 		Time:           time.Now().UTC(),

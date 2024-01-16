@@ -277,6 +277,7 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 		}
 
 		submitStatusFile := commons.NewSubmitStatusFile()
+		submitStatusFile.Token = config.Token
 
 		parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
 		parallelJobManager.Start()

@@ -22,7 +22,7 @@ const (
 	mdRepoUser         string = "md-uploader"
 	mdRepoUserPassword string = ""
 
-	mdRepoHome        string = "/" + mdRepoZone + "/home/shared/mdrepo"
+	mdRepoHome        string = "/" + mdRepoZone + "/home/shared/mdrepo/prod"
 	mdRepoLandingPath string = mdRepoHome + "/landing"
 	mdRepoReleasePath string = mdRepoHome + "/release"
 

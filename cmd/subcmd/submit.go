@@ -240,6 +240,14 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 		return commons.TokenNotProvidedError
 	}
 
+	// verify metadatas
+	invalidErr := commons.VerifySubmitMetadata(sourcePaths, tokenFlagValues.ServiceURL, config.Token)
+	if invalidErr != nil {
+		return invalidErr
+	} else {
+		logger.Debugf("all submit metadata are valid")
+	}
+
 	if retryFlagValues.RetryNumber > 0 && !retryFlagValues.RetryChild {
 		err = commons.RunWithRetry(retryFlagValues.RetryNumber, retryFlagValues.RetryIntervalSeconds)
 		if err != nil {

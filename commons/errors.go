@@ -9,4 +9,5 @@ var (
 	TicketNotReadyError          error = xerrors.Errorf("ticket not ready")
 	InvalidOrcIDError            error = xerrors.Errorf("invalid ORC-ID")
 	SimulationNoNotMatchingError error = xerrors.Errorf("simulation number not match")
+	InvalidSubmitMetadataError   error = xerrors.Errorf("invalid submit metadata")
 )

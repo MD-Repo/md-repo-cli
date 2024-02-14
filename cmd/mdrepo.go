@@ -8,6 +8,7 @@ import (
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/cmd/subcmd"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
+	"github.com/hashicorp/go-multierror"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -144,6 +145,10 @@ func main() {
 				fmt.Fprintf(os.Stderr, "MD-Repo data server error (code: '%d', message: '%s')\n", irodsError.Code, irodsError.Error())
 			} else {
 				fmt.Fprintf(os.Stderr, "MD-Repo data server error!\n")
+			}
+		} else if merr, ok := err.(*multierror.Error); ok {
+			for _, merrElem := range merr.Errors {
+				fmt.Fprintf(os.Stderr, "%s\n", merrElem.Error())
 			}
 		}
 

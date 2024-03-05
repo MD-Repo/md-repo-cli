@@ -214,6 +214,10 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 
 			return xerrors.Errorf("The number of simulations typed (%d) does not match the number of simulations we found (%d): %w", expectedSimulationNo, len(sourcePaths), commons.SimulationNoNotMatchingError)
 		}
+
+		if len(orcID) == 0 {
+			orcID = commons.InputOrcID()
+		}
 	}
 
 	if len(config.Token) > 0 && len(config.TicketString) == 0 {

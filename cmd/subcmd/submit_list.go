@@ -270,7 +270,7 @@ func printSubmitListDataObject(entry *irodsclient_types.IRODSDataObject) {
 
 		checksum := ""
 		if replica.Checksum != nil {
-			checksum = replica.Checksum.OriginalChecksum
+			checksum = replica.Checksum.IRODSChecksumString
 		}
 
 		printSubmitListTextGridRow(false, entry.Name, fmt.Sprintf("%d", entry.Size), checksum, replica.ModifyTime)

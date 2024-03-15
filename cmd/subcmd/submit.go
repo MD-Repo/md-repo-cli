@@ -1,6 +1,8 @@
 package subcmd
 
 import (
+	"bytes"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -391,7 +393,7 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 			return nil
 		}
 
-		hash, err := commons.HashLocalFile(sourcePath, "md5")
+		hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5")
 		if err != nil {
 			return xerrors.Errorf("failed to get hash for %s: %w", sourcePath, err)
 		}
@@ -404,7 +406,7 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 		submitStatusEntry := commons.SubmitStatusEntry{
 			IRODSPath: targetFileRelPath, // store relative path
 			Size:      sourceStat.Size(),
-			MD5Hash:   hash,
+			MD5Hash:   hex.EncodeToString(hash),
 		}
 		submitStatusFile.AddFile(submitStatusEntry)
 
@@ -413,7 +415,7 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 				if targetEntry.Size == sourceStat.Size() {
 					if len(targetEntry.CheckSum) > 0 {
 						// compare hash
-						if hash == targetEntry.CheckSum {
+						if bytes.Equal(hash, targetEntry.CheckSum) {
 							fmt.Printf("skip uploading file %s. The file with the same hash already exists!\n", targetFilePath)
 							return nil
 						}

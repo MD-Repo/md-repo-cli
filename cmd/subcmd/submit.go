@@ -296,7 +296,7 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 		parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
 		parallelJobManager.Start()
 
-		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, targetPath, forceFlagValues.Force)
+		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, targetPath, forceFlagValues, parallelTransferFlagValues)
 		if err != nil {
 			submitStatusFile.SetErrored()
 			submitStatusFile.CreateStatusFile(filesystem, targetPath)
@@ -340,7 +340,7 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 	return nil
 }
 
-func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile *commons.SubmitStatusFile, sourcePath string, targetPath string, force bool) error {
+func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile *commons.SubmitStatusFile, sourcePath string, targetPath string, forceFlagValues *flag.ForceFlagValues, parallelTransferFlagValues *flag.ParallelTransferFlagValues) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "main",
 		"function": "submitOne",
@@ -382,10 +382,19 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 			job.Progress(0, sourceStat.Size(), false)
 
 			logger.Debugf("uploading file %s to %s", sourcePath, targetFilePath)
-			err = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, callbackPut)
-			if err != nil {
+
+			var uploadErr error
+			if parallelTransferFlagValues.ThreadNumber == 1 {
+				uploadErr = fs.UploadFile(sourcePath, targetFilePath, "", false, callbackPut)
+			} else if parallelTransferFlagValues.RedirectToResource {
+				uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", false, callbackPut)
+			} else {
+				uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, callbackPut)
+			}
+
+			if uploadErr != nil {
 				job.Progress(-1, sourceStat.Size(), true)
-				return xerrors.Errorf("failed to upload %s to %s: %w", sourcePath, targetFilePath, err)
+				return xerrors.Errorf("failed to upload %s to %s: %w", sourcePath, targetFilePath, uploadErr)
 			}
 
 			logger.Debugf("uploaded file %s to %s", sourcePath, targetFilePath)
@@ -411,7 +420,7 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 		submitStatusFile.AddFile(submitStatusEntry)
 
 		if fileExist {
-			if !force {
+			if !forceFlagValues.Force {
 				if targetEntry.Size == sourceStat.Size() {
 					if len(targetEntry.CheckSum) > 0 {
 						// compare hash
@@ -444,7 +453,7 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 		// make target dir
 		for _, entryInDir := range entries {
 			newSourcePath := filepath.Join(sourcePath, entryInDir.Name())
-			err = submitOne(parallelJobManager, submitStatusFile, newSourcePath, targetPath, force)
+			err = submitOne(parallelJobManager, submitStatusFile, newSourcePath, targetPath, forceFlagValues, parallelTransferFlagValues)
 			if err != nil {
 				return xerrors.Errorf("failed to perform put %s to %s: %w", newSourcePath, targetPath, err)
 			}

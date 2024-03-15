@@ -274,7 +274,6 @@ func printSubmitListDataObject(entry *irodsclient_types.IRODSDataObject) {
 		}
 
 		printSubmitListTextGridRow(false, entry.Name, fmt.Sprintf("%d", entry.Size), checksum, replica.ModifyTime)
-
 	}
 }
 

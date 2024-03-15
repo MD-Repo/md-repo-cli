@@ -129,7 +129,7 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
 		parallelJobManager.Start()
 
-		err = getOne(parallelJobManager, sourcePath, targetPath, forceFlagValues.Force)
+		err = getOne(parallelJobManager, sourcePath, targetPath, forceFlagValues, parallelTransferFlagValues)
 		if err != nil {
 			filesystem.Release()
 			return xerrors.Errorf("failed to perform get %s to %s: %w", sourcePath, targetPath, err)
@@ -147,7 +147,7 @@ func processGetCommand(command *cobra.Command, args []string) error {
 	return nil
 }
 
-func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, targetPath string, force bool) error {
+func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, targetPath string, forceFlagValues *flag.ForceFlagValues, parallelTransferFlagValues *flag.ParallelTransferFlagValues) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "main",
 		"function": "getOne",
@@ -193,10 +193,19 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 			job.Progress(0, sourceEntry.Size, false)
 
 			logger.Debugf("downloading file %s to %s", sourcePath, targetFilePath)
-			err := fs.DownloadFileParallel(sourcePath, "", targetFilePath, 0, callbackGet)
-			if err != nil {
+
+			var downloadErr error
+			if parallelTransferFlagValues.ThreadNumber == 1 {
+				downloadErr = fs.DownloadFileResumable(sourcePath, "", targetFilePath, callbackGet)
+			} else if parallelTransferFlagValues.RedirectToResource {
+				downloadErr = fs.DownloadFileRedirectToResource(sourcePath, "", targetFilePath, callbackGet)
+			} else {
+				downloadErr = fs.DownloadFileParallelResumable(sourcePath, "", targetFilePath, 0, callbackGet)
+			}
+
+			if downloadErr != nil {
 				job.Progress(-1, sourceEntry.Size, true)
-				return xerrors.Errorf("failed to download %s to %s: %w", sourcePath, targetFilePath, err)
+				return xerrors.Errorf("failed to download %s to %s: %w", sourcePath, targetFilePath, downloadErr)
 			}
 
 			logger.Debugf("downloaded file %s to %s", sourcePath, targetFilePath)
@@ -205,7 +214,7 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 		}
 
 		if fileExist {
-			if !force {
+			if !forceFlagValues.Force {
 				if targetEntry.Size() == sourceEntry.Size {
 					if len(sourceEntry.CheckSum) > 0 {
 						// compare hash
@@ -254,7 +263,7 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 		for idx := range entries {
 			path := entries[idx].Path
 
-			err = getOne(parallelJobManager, path, targetDir, force)
+			err = getOne(parallelJobManager, path, targetDir, forceFlagValues, parallelTransferFlagValues)
 			if err != nil {
 				return xerrors.Errorf("failed to get %s to %s: %w", path, targetDir, err)
 			}

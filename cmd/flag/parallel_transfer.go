@@ -6,10 +6,10 @@ import (
 )
 
 type ParallelTransferFlagValues struct {
-	SingleTread        bool
 	ThreadNumber       int
 	TCPBufferSize      int
 	tcpBufferSizeInput string
+	RedirectToResource bool
 }
 
 var (
@@ -19,6 +19,7 @@ var (
 func SetParallelTransferFlags(command *cobra.Command) {
 	command.Flags().IntVar(&parallelTransferFlagValues.ThreadNumber, "thread_num", commons.TransferTreadNumDefault, "Specify the number of transfer threads")
 	command.Flags().StringVar(&parallelTransferFlagValues.tcpBufferSizeInput, "tcp_buffer_size", commons.TcpBufferSizeStringDefault, "Specify TCP socket buffer size")
+	command.Flags().BoolVar(&parallelTransferFlagValues.RedirectToResource, "redirect", false, "Redirect to resource server")
 }
 
 func GetParallelTransferFlagValues() *ParallelTransferFlagValues {

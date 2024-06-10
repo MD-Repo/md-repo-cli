@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/creativeprojects/go-selfupdate v1.1.0
-	github.com/cyverse/go-irodsclient v0.14.0
+	github.com/cyverse/go-irodsclient v0.14.7
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/jedib0t/go-pretty/v6 v6.4.6
 	github.com/sirupsen/logrus v1.9.3
@@ -26,10 +26,12 @@ require (
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.2 // indirect
+	github.com/hashicorp/go-rootcerts v1.0.2 // indirect
 	github.com/hashicorp/go-version v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-runewidth v0.0.13 // indirect
+	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

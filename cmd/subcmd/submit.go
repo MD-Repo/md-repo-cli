@@ -23,7 +23,7 @@ import (
 var submitCmd = &cobra.Command{
 	Use:     "submit [data dirs] ...",
 	Short:   "Submit local data to MD-Repo",
-	Aliases: []string{"upload", "up", "put"},
+	Aliases: []string{"upload", "up", "put", "contribute"},
 	RunE:    processSubmitCommand,
 	Args:    cobra.MinimumNArgs(1),
 }
@@ -167,7 +167,7 @@ func scanSourcePaths(sourcePaths []string, orcID string) ([]string, []string, st
 
 func processSubmitCommand(command *cobra.Command, args []string) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "main",
+		"package":  "subcmd",
 		"function": "processSubmitCommand",
 	})
 
@@ -362,7 +362,7 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 
 func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile *commons.SubmitStatusFile, sourcePath string, targetPath string, forceFlagValues *flag.ForceFlagValues, parallelTransferFlagValues *flag.ParallelTransferFlagValues) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "main",
+		"package":  "subcmd",
 		"function": "submitOne",
 	})
 
@@ -407,9 +407,27 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 			if parallelTransferFlagValues.ThreadNumber == 1 {
 				uploadErr = fs.UploadFile(sourcePath, targetFilePath, "", false, callbackPut)
 			} else if parallelTransferFlagValues.RedirectToResource {
-				uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", false, callbackPut)
-			} else {
+				uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", 0, false, callbackPut)
+			} else if parallelTransferFlagValues.Icat {
 				uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, callbackPut)
+			} else {
+				// auto
+				if sourceStat.Size() >= commons.RedirectToResourceMinSize {
+					// redirect-to-resource
+					uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", 0, false, callbackPut)
+				} else {
+					if filesystem.SupportParallelUpload() {
+						uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, callbackPut)
+					} else {
+						if sourceStat.Size() >= commons.ParallelUploadMinSize {
+							// does not support parall upload via iCAT
+							// redirect-to-resource
+							uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", 0, false, callbackPut)
+						} else {
+							uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, callbackPut)
+						}
+					}
+				}
 			}
 
 			if uploadErr != nil {

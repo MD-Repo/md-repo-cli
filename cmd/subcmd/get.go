@@ -42,7 +42,7 @@ func AddGetCommand(rootCmd *cobra.Command) {
 
 func processGetCommand(command *cobra.Command, args []string) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "main",
+		"package":  "subcmd",
 		"function": "processGetCommand",
 	})
 
@@ -149,7 +149,7 @@ func processGetCommand(command *cobra.Command, args []string) error {
 
 func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, targetPath string, forceFlagValues *flag.ForceFlagValues, parallelTransferFlagValues *flag.ParallelTransferFlagValues) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "main",
+		"package":  "subcmd",
 		"function": "getOne",
 	})
 
@@ -198,9 +198,17 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 			if parallelTransferFlagValues.ThreadNumber == 1 {
 				downloadErr = fs.DownloadFileResumable(sourcePath, "", targetFilePath, callbackGet)
 			} else if parallelTransferFlagValues.RedirectToResource {
-				downloadErr = fs.DownloadFileRedirectToResource(sourcePath, "", targetFilePath, callbackGet)
-			} else {
+				downloadErr = fs.DownloadFileRedirectToResource(sourcePath, "", targetFilePath, 0, callbackGet)
+			} else if parallelTransferFlagValues.Icat {
 				downloadErr = fs.DownloadFileParallelResumable(sourcePath, "", targetFilePath, 0, callbackGet)
+			} else {
+				// auto
+				if sourceEntry.Size >= commons.RedirectToResourceMinSize {
+					// redirect-to-resource
+					downloadErr = fs.DownloadFileRedirectToResource(sourcePath, "", targetFilePath, 0, callbackGet)
+				} else {
+					downloadErr = fs.DownloadFileParallelResumable(sourcePath, "", targetFilePath, 0, callbackGet)
+				}
 			}
 
 			if downloadErr != nil {

@@ -39,7 +39,7 @@ func AddSubmitListCommand(rootCmd *cobra.Command) {
 
 func processSubmitListCommand(command *cobra.Command, args []string) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "main",
+		"package":  "subcmd",
 		"function": "processSubmitListCommand",
 	})
 
@@ -207,7 +207,7 @@ func catStatusFile(fs *irodsclient_fs.FileSystem, targetPath string) error {
 
 func getPrettyStatusFileJSON(jsonBytes []byte) string {
 	logger := log.WithFields(log.Fields{
-		"package":  "main",
+		"package":  "subcmd",
 		"function": "getPrettyStatusFileJSON",
 	})
 

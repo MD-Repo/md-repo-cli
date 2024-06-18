@@ -7,6 +7,7 @@ import (
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/cmd/subcmd"
+	"github.com/MD-Repo/md-repo-cli/commons"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	"github.com/hashicorp/go-multierror"
 	log "github.com/sirupsen/logrus"
@@ -149,6 +150,28 @@ func main() {
 		} else if merr, ok := err.(*multierror.Error); ok {
 			for _, merrElem := range merr.Errors {
 				fmt.Fprintf(os.Stderr, "%s\n", merrElem.Error())
+			}
+		} else if commons.IsSimulationNoNotMatchingError(err) {
+			var matchingError *commons.SimulationNoNotMatchingError
+			if errors.As(err, &matchingError) {
+				fmt.Fprintf(os.Stderr, "MD-Repo simulation number not matching error!\n")
+				fmt.Fprintf(os.Stderr, "%s\n", matchingError.Error())
+
+				if len(matchingError.ValidSimulationPaths) > 0 {
+					fmt.Fprintf(os.Stderr, "the simulations found:\n")
+					for sourceIdx, sourcePath := range matchingError.ValidSimulationPaths {
+						fmt.Fprintf(os.Stderr, "[%d] %s\n", sourceIdx+1, sourcePath)
+					}
+				}
+
+				if len(matchingError.InvalidSimulationPaths) > 0 {
+					fmt.Fprintf(os.Stderr, "the directories ignored due to lack of metadata file:\n")
+					for sourceIdx, sourcePath := range matchingError.InvalidSimulationPaths {
+						fmt.Fprintf(os.Stderr, "[%d] %s\n", sourceIdx+1, sourcePath)
+					}
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "MD-Repo simulation number not matching error!\n")
 			}
 		}
 

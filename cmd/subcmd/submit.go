@@ -405,26 +405,26 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 
 			var uploadErr error
 			if parallelTransferFlagValues.ThreadNumber == 1 {
-				uploadErr = fs.UploadFile(sourcePath, targetFilePath, "", false, callbackPut)
+				uploadErr = fs.UploadFile(sourcePath, targetFilePath, "", false, true, true, callbackPut)
 			} else if parallelTransferFlagValues.RedirectToResource {
-				uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", 0, false, callbackPut)
+				uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", 0, false, true, true, callbackPut)
 			} else if parallelTransferFlagValues.Icat {
-				uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, callbackPut)
+				uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, true, true, callbackPut)
 			} else {
 				// auto
 				if sourceStat.Size() >= commons.RedirectToResourceMinSize {
 					// redirect-to-resource
-					uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", 0, false, callbackPut)
+					uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", 0, false, true, true, callbackPut)
 				} else {
 					if filesystem.SupportParallelUpload() {
-						uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, callbackPut)
+						uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, true, true, callbackPut)
 					} else {
 						if sourceStat.Size() >= commons.ParallelUploadMinSize {
 							// does not support parall upload via iCAT
 							// redirect-to-resource
-							uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", 0, false, callbackPut)
+							uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", 0, false, true, true, callbackPut)
 						} else {
-							uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, callbackPut)
+							uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, true, true, callbackPut)
 						}
 					}
 				}

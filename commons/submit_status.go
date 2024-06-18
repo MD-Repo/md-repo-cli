@@ -141,7 +141,7 @@ func (s *SubmitStatusFile) CreateStatusFile(filesystem *fs.FileSystem, dataRootP
 		return xerrors.Errorf("failed to write submit status to buffer: %w", err)
 	}
 
-	err = filesystem.UploadFileFromBuffer(jsonBytesBuffer, statusFilePath, "", false, nil)
+	err = filesystem.UploadFileFromBuffer(jsonBytesBuffer, statusFilePath, "", false, false, false, nil)
 	if err != nil {
 		return xerrors.Errorf("failed to create submit status file %s: %w", statusFilePath, err)
 	}

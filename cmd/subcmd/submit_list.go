@@ -193,7 +193,7 @@ func listOne(fs *irodsclient_fs.FileSystem, targetRootPath string, targetPath st
 func catStatusFile(fs *irodsclient_fs.FileSystem, targetPath string) error {
 	buffer := bytes.Buffer{}
 
-	err := fs.DownloadFileToBuffer(targetPath, "", buffer, nil)
+	err := fs.DownloadFileToBuffer(targetPath, "", buffer, false, nil)
 	if err != nil {
 		return xerrors.Errorf("failed to download file %s: %w", targetPath, err)
 	}

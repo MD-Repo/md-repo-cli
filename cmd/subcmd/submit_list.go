@@ -95,7 +95,7 @@ func processSubmitListCommand(command *cobra.Command, args []string) error {
 
 		logger.Debugf("encrypted token: %s", newToken)
 
-		config.TicketString, err = commons.GetMDRepoTicketStringFromTokenWithRetry(tokenFlagValues.ServiceURL, newToken, commons.MDRepoGetTicketRetry, commons.MDRepoGetTicketRetryInterval)
+		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(tokenFlagValues.ServiceURL, newToken)
 		if err != nil {
 			return xerrors.Errorf("failed to read ticket from token: %w", err)
 		}

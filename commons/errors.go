@@ -8,14 +8,72 @@ import (
 )
 
 var (
-	InvalidTicketError    error = xerrors.Errorf("invalid ticket string")
-	InvalidTokenError     error = xerrors.Errorf("invalid token")
-	TokenNotProvidedError error = xerrors.Errorf("token not provided")
-	TicketNotReadyError   error = xerrors.Errorf("ticket not ready")
-	InvalidOrcIDError     error = xerrors.Errorf("invalid ORC-ID")
-	//SimulationNoNotMatchingError error = xerrors.Errorf("simulation number not match")
+	TokenNotProvidedError      error = xerrors.Errorf("token not provided")
+	InvalidOrcIDError          error = xerrors.Errorf("invalid ORC-ID")
 	InvalidSubmitMetadataError error = xerrors.Errorf("invalid submit metadata")
 )
+
+type MDRepoServiceError struct {
+	Message string
+}
+
+func NewMDRepoServiceError(message string) error {
+	return &MDRepoServiceError{
+		Message: message,
+	}
+}
+
+// Error returns error message
+func (err *MDRepoServiceError) Error() string {
+	return err.Message
+}
+
+// Is tests type of error
+func (err *MDRepoServiceError) Is(other error) bool {
+	_, ok := other.(*MDRepoServiceError)
+	return ok
+}
+
+// ToString stringifies the object
+func (err *MDRepoServiceError) ToString() string {
+	return fmt.Sprintf("MDRepoServiceError: %s", err.Message)
+}
+
+// IsMDRepoServiceError evaluates if the given error is MDRepoServiceError
+func IsMDRepoServiceError(err error) bool {
+	return errors.Is(err, &MDRepoServiceError{})
+}
+
+type InvalidTicketError struct {
+	Ticket string
+}
+
+func NewInvalidTicketError(ticket string) error {
+	return &InvalidTicketError{
+		Ticket: ticket,
+	}
+}
+
+// Error returns error message
+func (err *InvalidTicketError) Error() string {
+	return fmt.Sprintf("ticket '%s' is invalid", err.Ticket)
+}
+
+// Is tests type of error
+func (err *InvalidTicketError) Is(other error) bool {
+	_, ok := other.(*InvalidTicketError)
+	return ok
+}
+
+// ToString stringifies the object
+func (err *InvalidTicketError) ToString() string {
+	return fmt.Sprintf("InvalidTicketError: %s", err.Ticket)
+}
+
+// IsInvalidTicketError evaluates if the given error is InvalidTicketError
+func IsInvalidTicketError(err error) bool {
+	return errors.Is(err, &InvalidTicketError{})
+}
 
 type SimulationNoNotMatchingError struct {
 	ValidSimulationPaths   []string

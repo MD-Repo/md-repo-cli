@@ -2,13 +2,10 @@ package commons
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/xerrors"
@@ -38,18 +35,18 @@ func GetMDRepoTicketString(tickets []MDRepoTicket) (string, error) {
 func GetMDRepoTicketFromString(ticketString string) (MDRepoTicket, error) {
 	ticketParts := strings.Split(string(ticketString), ":")
 	if len(ticketParts) != 2 {
-		return MDRepoTicket{}, xerrors.Errorf("failed to parse ticket parts. must have two parts: %w", InvalidTicketError)
+		return MDRepoTicket{}, xerrors.Errorf("failed to parse ticket parts. must have two parts: %w", NewInvalidTicketError(ticketString))
 	}
 
 	irodsTicket := ticketParts[0]
 	irodsDataPath := ticketParts[1]
 
 	if !isAsciiString(irodsTicket) {
-		return MDRepoTicket{}, xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid: %w", irodsTicket, InvalidTicketError)
+		return MDRepoTicket{}, xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid: %w", irodsTicket, NewInvalidTicketError(ticketString))
 	}
 
 	if !isPathString(irodsDataPath) {
-		return MDRepoTicket{}, xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid: %w", irodsDataPath, InvalidTicketError)
+		return MDRepoTicket{}, xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid: %w", irodsDataPath, NewInvalidTicketError(ticketString))
 	}
 
 	return MDRepoTicket{
@@ -61,7 +58,7 @@ func GetMDRepoTicketFromString(ticketString string) (MDRepoTicket, error) {
 func GetMDRepoTicketsFromString(ticketString string) ([]MDRepoTicket, error) {
 	tickets := strings.Split(ticketString, ";")
 	if len(tickets) < 1 {
-		return nil, xerrors.Errorf("failed to parse tickets: %w", InvalidTicketError)
+		return nil, xerrors.Errorf("failed to parse tickets: %w", NewInvalidTicketError(ticketString))
 	}
 
 	mdRepoTickets := []MDRepoTicket{}
@@ -101,25 +98,6 @@ func isAsciiString(str string) bool {
 		}
 	}
 	return true
-}
-
-func GetMDRepoTicketStringFromTokenWithRetry(serviceURL string, token string, retry int, retryInterval time.Duration) (string, error) {
-	for i := 0; i < retry; i++ {
-		ticketString, err := GetMDRepoTicketStringFromToken(serviceURL, token)
-		if err != nil {
-			if !errors.Is(err, TicketNotReadyError) {
-				return ticketString, err
-			}
-
-			// retry
-			time.Sleep(retryInterval)
-			fmt.Fprintf(os.Stderr, "Ticket generation is not completed yet. We will wait %s and retry.\n", retryInterval.String())
-		} else {
-			return ticketString, nil
-		}
-	}
-
-	return "", xerrors.Errorf("failed to retrieve tickets from token after %d retries", retry)
 }
 
 func GetMDRepoTicketStringFromToken(serviceURL string, token string) (string, error) {
@@ -163,25 +141,18 @@ func GetMDRepoTicketStringFromToken(serviceURL string, token string) (string, er
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 404 {
-		return "", xerrors.Errorf("failed to retrieve tickets from token, not exist: %w", InvalidTokenError)
-	}
-
-	if resp.StatusCode == 102 || resp.StatusCode == 503 {
-		return "", TicketNotReadyError
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", xerrors.Errorf("failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode != 200 {
-		return "", xerrors.Errorf("failed to retrieve tickets from token, http error %s", resp.Status)
+		return "", NewMDRepoServiceError(string(responseBody))
 	}
 
-	ticketStringJsonBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", xerrors.Errorf("failed to retrieve tickets from token, read failed: %w", err)
-	}
-
+	// response body will be ticket object
 	ticketObject := MDRepoTicketObject{}
-	err = json.Unmarshal(ticketStringJsonBytes, &ticketObject)
+	err = json.Unmarshal(responseBody, &ticketObject)
 	if err != nil {
 		return "", xerrors.Errorf("failed to unmarshal ticket object from JSON: %w", err)
 	}

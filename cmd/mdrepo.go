@@ -147,6 +147,22 @@ func main() {
 			} else {
 				fmt.Fprintf(os.Stderr, "MD-Repo data server error!\n")
 			}
+		} else if commons.IsInvalidTicketError(err) {
+			var invalidTicketError *commons.InvalidTicketError
+			if errors.As(err, &invalidTicketError) {
+				fmt.Fprintf(os.Stderr, "MD-Repo ticket '%s' is invalid!\n", invalidTicketError.Ticket)
+			} else {
+				fmt.Fprintf(os.Stderr, "MD-Repo ticket is invalid!\n")
+			}
+		} else if errors.Is(err, commons.TokenNotProvidedError) {
+			fmt.Fprintf(os.Stderr, "MD-Repo token is not provided!\n")
+		} else if commons.IsMDRepoServiceError(err) {
+			var serviceError *commons.MDRepoServiceError
+			if errors.As(err, &serviceError) {
+				fmt.Fprintf(os.Stderr, "%s\n", serviceError.Message)
+			} else {
+				fmt.Fprintf(os.Stderr, "MD-Repo service error!\n")
+			}
 		} else if merr, ok := err.(*multierror.Error); ok {
 			for _, merrElem := range merr.Errors {
 				fmt.Fprintf(os.Stderr, "%s\n", merrElem.Error())
@@ -173,9 +189,10 @@ func main() {
 			} else {
 				fmt.Fprintf(os.Stderr, "MD-Repo simulation number not matching error!\n")
 			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Unexpected error!\nError Trace:\n  - %+v\n", err)
 		}
 
-		fmt.Fprintf(os.Stderr, "\nError Trace:\n  - %+v\n", err)
 		os.Exit(1)
 	}
 }

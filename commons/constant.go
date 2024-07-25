@@ -34,9 +34,6 @@ const (
 	mdRepoGetTicketApi      string = "/api/v1/get_ticket"
 	mdRepoVerifyMetadataApi string = "/api/v1/verify_metadata"
 
-	MDRepoGetTicketRetry         int           = 5
-	MDRepoGetTicketRetryInterval time.Duration = 10 * time.Second
-
 	submissionStatusFilename   string = "mdrepo-submission.%s.json"
 	SubmissionMetadataFilename string = "mdrepo-metadata.toml"
 )

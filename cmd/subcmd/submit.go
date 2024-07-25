@@ -437,6 +437,8 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 
 			logger.Debugf("uploaded file %s to %s", sourcePath, targetFilePath)
 			job.Progress(sourceStat.Size(), sourceStat.Size(), false)
+
+			job.Done()
 			return nil
 		}
 

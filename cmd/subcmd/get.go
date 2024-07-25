@@ -196,18 +196,18 @@ func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, t
 
 			var downloadErr error
 			if parallelTransferFlagValues.ThreadNumber == 1 {
-				downloadErr = fs.DownloadFileResumable(sourcePath, "", targetFilePath, true, callbackGet)
+				_, downloadErr = fs.DownloadFileResumable(sourcePath, "", targetFilePath, true, callbackGet)
 			} else if parallelTransferFlagValues.RedirectToResource {
-				downloadErr = fs.DownloadFileRedirectToResource(sourcePath, "", targetFilePath, 0, true, callbackGet)
+				_, downloadErr = fs.DownloadFileRedirectToResource(sourcePath, "", targetFilePath, 0, true, callbackGet)
 			} else if parallelTransferFlagValues.Icat {
-				downloadErr = fs.DownloadFileParallelResumable(sourcePath, "", targetFilePath, 0, true, callbackGet)
+				_, downloadErr = fs.DownloadFileParallelResumable(sourcePath, "", targetFilePath, 0, true, callbackGet)
 			} else {
 				// auto
 				if sourceEntry.Size >= commons.RedirectToResourceMinSize {
 					// redirect-to-resource
-					downloadErr = fs.DownloadFileRedirectToResource(sourcePath, "", targetFilePath, 0, true, callbackGet)
+					_, downloadErr = fs.DownloadFileRedirectToResource(sourcePath, "", targetFilePath, 0, true, callbackGet)
 				} else {
-					downloadErr = fs.DownloadFileParallelResumable(sourcePath, "", targetFilePath, 0, true, callbackGet)
+					_, downloadErr = fs.DownloadFileParallelResumable(sourcePath, "", targetFilePath, 0, true, callbackGet)
 				}
 			}
 

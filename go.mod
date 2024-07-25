@@ -12,6 +12,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	golang.org/x/crypto v0.6.0
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d
+	golang.org/x/term v0.22.0
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2
 	gopkg.in/yaml.v2 v2.4.0
 )
@@ -42,7 +43,7 @@ require (
 	github.com/xanzy/go-gitlab v0.80.2 // indirect
 	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/oauth2 v0.5.0 // indirect
-	golang.org/x/sys v0.13.0 // indirect
+	golang.org/x/sys v0.22.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect

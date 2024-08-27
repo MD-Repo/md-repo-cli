@@ -2,9 +2,9 @@ package subcmd
 
 import (
 	"bytes"
-	"fmt"
+	"encoding/hex"
 	"os"
-	"path/filepath"
+	"time"
 
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
@@ -33,20 +33,73 @@ func AddGetCommand(rootCmd *cobra.Command) {
 
 	flag.SetTokenFlags(getCmd)
 	flag.SetForceFlags(getCmd, false)
-	flag.SetParallelTransferFlags(getCmd)
+	flag.SetParallelTransferFlags(getCmd, false)
 	flag.SetProgressFlags(getCmd)
 	flag.SetRetryFlags(getCmd)
+	flag.SetTransferReportFlags(getCmd)
 
 	rootCmd.AddCommand(getCmd)
 }
 
 func processGetCommand(command *cobra.Command, args []string) error {
-	logger := log.WithFields(log.Fields{
-		"package":  "subcmd",
-		"function": "processGetCommand",
-	})
+	get, err := NewGetCommand(command, args)
+	if err != nil {
+		return err
+	}
 
-	cont, err := flag.ProcessCommonFlags(command)
+	return get.Process()
+}
+
+type GetCommand struct {
+	command *cobra.Command
+
+	tokenFlagValues            *flag.TokenFlagValues
+	forceFlagValues            *flag.ForceFlagValues
+	parallelTransferFlagValues *flag.ParallelTransferFlagValues
+	progressFlagValues         *flag.ProgressFlagValues
+	retryFlagValues            *flag.RetryFlagValues
+	transferReportFlagValues   *flag.TransferReportFlagValues
+
+	maxConnectionNum int
+
+	account    *irodsclient_types.IRODSAccount
+	filesystem *irodsclient_fs.FileSystem
+
+	targetPath string
+
+	parallelJobManager    *commons.ParallelJobManager
+	transferReportManager *commons.TransferReportManager
+	updatedPathMap        map[string]bool
+}
+
+func NewGetCommand(command *cobra.Command, args []string) (*GetCommand, error) {
+	get := &GetCommand{
+		command: command,
+
+		tokenFlagValues:            flag.GetTokenFlagValues(),
+		forceFlagValues:            flag.GetForceFlagValues(),
+		parallelTransferFlagValues: flag.GetParallelTransferFlagValues(),
+		progressFlagValues:         flag.GetProgressFlagValues(),
+		retryFlagValues:            flag.GetRetryFlagValues(),
+		transferReportFlagValues:   flag.GetTransferReportFlagValues(command),
+
+		updatedPathMap: map[string]bool{},
+	}
+
+	get.maxConnectionNum = get.parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
+
+	// path
+	get.targetPath = "./"
+
+	if len(args) > 0 {
+		get.targetPath = args[0]
+	}
+
+	return get, nil
+}
+
+func (get *GetCommand) Process() error {
+	cont, err := flag.ProcessCommonFlags(get.command)
 	if err != nil {
 		return xerrors.Errorf("failed to process common flags: %w", err)
 	}
@@ -55,23 +108,15 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		return nil
 	}
 
-	tokenFlagValues := flag.GetTokenFlagValues()
-	forceFlagValues := flag.GetForceFlagValues()
-	parallelTransferFlagValues := flag.GetParallelTransferFlagValues()
-	progressFlagValues := flag.GetProgressFlagValues()
-	retryFlagValues := flag.GetRetryFlagValues()
-
-	maxConnectionNum := parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
-
 	config := commons.GetConfig()
 
 	// handle token
-	if len(tokenFlagValues.TicketString) > 0 {
-		config.TicketString = tokenFlagValues.TicketString
+	if len(get.tokenFlagValues.TicketString) > 0 {
+		config.TicketString = get.tokenFlagValues.TicketString
 	}
 
-	if len(tokenFlagValues.Token) > 0 {
-		config.Token = tokenFlagValues.Token
+	if len(get.tokenFlagValues.Token) > 0 {
+		config.Token = get.tokenFlagValues.Token
 	}
 
 	// handle local flags
@@ -81,7 +126,7 @@ func processGetCommand(command *cobra.Command, args []string) error {
 	}
 
 	if len(config.Token) > 0 && len(config.TicketString) == 0 {
-		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(tokenFlagValues.ServiceURL, config.Token)
+		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(get.tokenFlagValues.ServiceURL, config.Token)
 		if err != nil {
 			return xerrors.Errorf("failed to read ticket from token: %w", err)
 		}
@@ -91,191 +136,325 @@ func processGetCommand(command *cobra.Command, args []string) error {
 		return commons.TokenNotProvidedError
 	}
 
-	if retryFlagValues.RetryNumber > 0 && !retryFlagValues.RetryChild {
-		err = commons.RunWithRetry(retryFlagValues.RetryNumber, retryFlagValues.RetryIntervalSeconds)
+	// handle retry
+	if get.retryFlagValues.RetryNumber > 0 && !get.retryFlagValues.RetryChild {
+		err = commons.RunWithRetry(get.retryFlagValues.RetryNumber, get.retryFlagValues.RetryIntervalSeconds)
 		if err != nil {
-			return xerrors.Errorf("failed to run with retry %d: %w", retryFlagValues.RetryNumber, err)
+			return xerrors.Errorf("failed to run with retry %d: %w", get.retryFlagValues.RetryNumber, err)
 		}
 		return nil
 	}
 
-	targetPath := args[0]
-
+	// get ticket
 	mdRepoTickets, err := commons.GetMDRepoTicketsFromString(config.TicketString)
 	if err != nil {
 		return xerrors.Errorf("failed to retrieve tickets: %w", err)
 	}
 
+	// transfer report
+	get.transferReportManager, err = commons.NewTransferReportManager(get.transferReportFlagValues.Report, get.transferReportFlagValues.ReportPath, get.transferReportFlagValues.ReportToStdout)
+	if err != nil {
+		return xerrors.Errorf("failed to create transfer report manager: %w", err)
+	}
+	defer get.transferReportManager.Release()
+
+	// run
+	if len(mdRepoTickets) >= 2 {
+		// multi-source, target must be a dir
+		err = get.ensureTargetIsDir(get.targetPath)
+		if err != nil {
+			return err
+		}
+	}
+
 	// we may further optimize this by run it parallel
 	for _, mdRepoTicket := range mdRepoTickets {
-		sourcePath := commons.MakeIRODSReleasePath(mdRepoTicket.IRODSDataPath)
-		targetPath = commons.MakeLocalPath(targetPath)
-
-		// display
-		logger.Debugf("download iRODS ticket: %s", mdRepoTicket.IRODSTicket)
-		logger.Debugf("download %s => %s", sourcePath, targetPath)
-
+		// we create filesystem, job manager for every ticket as they require separate auth
 		// Create a file system
-		account, err := commons.GetAccount(&mdRepoTicket)
+		get.account, err = commons.GetAccount(&mdRepoTicket)
 		if err != nil {
 			return xerrors.Errorf("failed to get iRODS Account: %w", err)
 		}
 
-		filesystem, err := commons.GetIRODSFSClientAdvanced(account, maxConnectionNum, parallelTransferFlagValues.TCPBufferSize)
+		get.filesystem, err = commons.GetIRODSFSClientAdvanced(get.account, get.maxConnectionNum, get.parallelTransferFlagValues.TCPBufferSize)
 		if err != nil {
 			return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
 		}
+		defer get.filesystem.Release()
 
-		parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
-		parallelJobManager.Start()
+		// parallel job manager
+		get.parallelJobManager = commons.NewParallelJobManager(get.filesystem, get.parallelTransferFlagValues.ThreadNumber, !get.progressFlagValues.NoProgress, false)
+		get.parallelJobManager.Start()
 
-		err = getOne(parallelJobManager, sourcePath, targetPath, forceFlagValues, parallelTransferFlagValues)
+		// run
+		err = get.getOne(mdRepoTicket, get.targetPath)
 		if err != nil {
-			filesystem.Release()
-			return xerrors.Errorf("failed to perform get %s to %s: %w", sourcePath, targetPath, err)
+			return xerrors.Errorf("failed to get %q to %q: %w", mdRepoTicket.IRODSDataPath, get.targetPath, err)
 		}
 
-		parallelJobManager.DoneScheduling()
-		err = parallelJobManager.Wait()
+		// release parallel job manager
+		get.parallelJobManager.DoneScheduling()
+		err = get.parallelJobManager.Wait()
 		if err != nil {
-			filesystem.Release()
+			get.filesystem.Release()
 			return xerrors.Errorf("failed to perform parallel jobs: %w", err)
 		}
-
-		filesystem.Release()
 	}
 	return nil
 }
 
-func getOne(parallelJobManager *commons.ParallelJobManager, sourcePath string, targetPath string, forceFlagValues *flag.ForceFlagValues, parallelTransferFlagValues *flag.ParallelTransferFlagValues) error {
+func (get *GetCommand) ensureTargetIsDir(targetPath string) error {
+	targetPath = commons.MakeLocalPath(targetPath)
+
+	targetStat, err := os.Stat(targetPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// not exist
+			return commons.NewNotDirError(targetPath)
+		}
+
+		return xerrors.Errorf("failed to stat %q: %w", targetPath, err)
+	}
+
+	if !targetStat.IsDir() {
+		return commons.NewNotDirError(targetPath)
+	}
+
+	return nil
+}
+
+func (get *GetCommand) getOne(mdRepoTicket commons.MDRepoTicket, targetPath string) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "subcmd",
+		"struct":   "GetCommand",
 		"function": "getOne",
 	})
 
-	filesystem := parallelJobManager.GetFilesystem()
+	// run
+	sourcePath := commons.MakeIRODSReleasePath(mdRepoTicket.IRODSDataPath)
+	targetPath = commons.MakeLocalPath(targetPath)
 
-	sourceEntry, err := filesystem.Stat(sourcePath)
+	logger.Debugf("download %q to %q (ticket: %q)", sourcePath, targetPath, mdRepoTicket.IRODSTicket)
+
+	sourceEntry, err := get.filesystem.Stat(sourcePath)
 	if err != nil {
-		return xerrors.Errorf("failed to stat %s: %w", sourcePath, err)
+		return xerrors.Errorf("failed to stat %q: %w", sourcePath, err)
 	}
 
-	if sourceEntry.Type == irodsclient_fs.FileEntry {
-		targetFilePath := commons.MakeTargetLocalFilePath(sourcePath, targetPath)
-		targetDirPath := commons.GetDir(targetFilePath)
-		_, err := os.Stat(targetDirPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return irodsclient_types.NewFileNotFoundError(targetDirPath)
-			}
+	if sourceEntry.IsDir() {
+		// dir
+		targetPath = commons.MakeTargetLocalFilePath(sourcePath, targetPath)
+		return get.getDir(sourceEntry, targetPath)
+	}
 
-			return xerrors.Errorf("failed to stat dir %s: %w", targetDirPath, err)
+	// file
+	targetPath = commons.MakeTargetLocalFilePath(sourcePath, targetPath)
+	return get.getFile(sourceEntry, "", targetPath)
+
+}
+
+func (get *GetCommand) scheduleGet(sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string) error {
+	logger := log.WithFields(log.Fields{
+		"package":  "subcmd",
+		"struct":   "GetCommand",
+		"function": "scheduleGet",
+	})
+
+	getTask := func(job *commons.ParallelJob) error {
+		manager := job.GetManager()
+		fs := manager.GetFilesystem()
+
+		callbackGet := func(processed int64, total int64) {
+			job.Progress(processed, total, false)
 		}
 
-		fileExist := false
-		targetEntry, err := os.Stat(targetFilePath)
+		job.Progress(0, sourceEntry.Size, false)
+
+		logger.Debugf("downloading a data object %q to %q", sourceEntry.Path, targetPath)
+
+		var downloadErr error
+		var downloadResult *irodsclient_fs.FileTransferResult
+		notes := []string{}
+
+		downloadPath := targetPath
+		if len(tempPath) > 0 {
+			downloadPath = tempPath
+		}
+
+		// determine how to download
+		if get.parallelTransferFlagValues.SingleTread || get.parallelTransferFlagValues.ThreadNumber == 1 {
+			downloadResult, downloadErr = fs.DownloadFile(sourceEntry.Path, "", downloadPath, true, callbackGet)
+			notes = append(notes, "icat", "single-thread")
+		} else if get.parallelTransferFlagValues.RedirectToResource {
+			downloadResult, downloadErr = fs.DownloadFileRedirectToResource(sourceEntry.Path, "", downloadPath, 0, true, callbackGet)
+			notes = append(notes, "redirect-to-resource")
+		} else if get.parallelTransferFlagValues.Icat {
+			downloadResult, downloadErr = fs.DownloadFileParallel(sourceEntry.Path, "", downloadPath, 0, true, callbackGet)
+			notes = append(notes, "icat", "multi-thread")
+		} else {
+			// auto
+			if sourceEntry.Size >= commons.RedirectToResourceMinSize {
+				// redirect-to-resource
+				downloadResult, downloadErr = fs.DownloadFileRedirectToResource(sourceEntry.Path, "", downloadPath, 0, true, callbackGet)
+				notes = append(notes, "redirect-to-resource")
+			} else {
+				downloadResult, downloadErr = fs.DownloadFileParallel(sourceEntry.Path, "", downloadPath, 0, true, callbackGet)
+				notes = append(notes, "icat", "multi-thread")
+			}
+		}
+
+		if downloadErr != nil {
+			job.Progress(-1, sourceEntry.Size, true)
+			return xerrors.Errorf("failed to download %q to %q: %w", sourceEntry.Path, targetPath, downloadErr)
+		}
+
+		err := get.transferReportManager.AddTransfer(downloadResult, commons.TransferMethodGet, downloadErr, notes)
 		if err != nil {
-			if !os.IsNotExist(err) {
-				return xerrors.Errorf("failed to stat %s: %w", targetFilePath, err)
+			job.Progress(-1, sourceEntry.Size, true)
+			return xerrors.Errorf("failed to add transfer report: %w", err)
+		}
+
+		logger.Debugf("downloaded a data object %q to %q", sourceEntry.Path, targetPath)
+		job.Progress(sourceEntry.Size, sourceEntry.Size, false)
+
+		job.Done()
+		return nil
+	}
+
+	threadsRequired := irodsclient_util.GetNumTasksForParallelTransfer(sourceEntry.Size)
+	err := get.parallelJobManager.Schedule(sourceEntry.Path, getTask, threadsRequired, progress.UnitsBytes)
+	if err != nil {
+		return xerrors.Errorf("failed to schedule download %q to %q: %w", sourceEntry.Path, targetPath, err)
+	}
+
+	logger.Debugf("scheduled a data object download %q to %q", sourceEntry.Path, targetPath)
+
+	return nil
+}
+
+func (get *GetCommand) getFile(sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string) error {
+	logger := log.WithFields(log.Fields{
+		"package":  "subcmd",
+		"struct":   "GetCommand",
+		"function": "getFile",
+	})
+
+	commons.MarkPathMap(get.updatedPathMap, targetPath)
+
+	targetStat, err := os.Stat(targetPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// target does not exist
+			// target must be a file with new name
+			return get.scheduleGet(sourceEntry, tempPath, targetPath)
+		}
+
+		return xerrors.Errorf("failed to stat %q: %w", targetPath, err)
+	}
+
+	// target exists
+	// target must be a file
+	if targetStat.IsDir() {
+		return commons.NewNotFileError(targetPath)
+	}
+
+	if !get.forceFlagValues.Force {
+		if targetStat.Size() == sourceEntry.Size {
+			// compare hash
+			if len(sourceEntry.CheckSum) > 0 {
+				localChecksum, err := irodsclient_util.HashLocalFile(targetPath, string(sourceEntry.CheckSumAlgorithm))
+				if err != nil {
+					return xerrors.Errorf("failed to get hash of %q: %w", targetPath, err)
+				}
+
+				if bytes.Equal(sourceEntry.CheckSum, localChecksum) {
+					// skip
+					now := time.Now()
+					reportFile := &commons.TransferReportFile{
+						Method:            commons.TransferMethodGet,
+						StartAt:           now,
+						EndAt:             now,
+						SourcePath:        sourceEntry.Path,
+						SourceSize:        sourceEntry.Size,
+						SourceChecksum:    hex.EncodeToString(sourceEntry.CheckSum),
+						DestPath:          targetPath,
+						DestSize:          targetStat.Size(),
+						DestChecksum:      hex.EncodeToString(localChecksum),
+						ChecksumAlgorithm: string(sourceEntry.CheckSumAlgorithm),
+						Notes:             []string{"differential", "same checksum", "skip"},
+					}
+
+					get.transferReportManager.AddFile(reportFile)
+
+					commons.Printf("skip downloading a data object %q to %q. The file with the same hash already exists!\n", sourceEntry.Path, targetPath)
+					logger.Debugf("skip downloading a data object %q to %q. The file with the same hash already exists!", sourceEntry.Path, targetPath)
+					return nil
+				}
+			}
+		}
+	}
+
+	// schedule
+	return get.scheduleGet(sourceEntry, tempPath, targetPath)
+}
+
+func (get *GetCommand) getDir(sourceEntry *irodsclient_fs.Entry, targetPath string) error {
+	commons.MarkPathMap(get.updatedPathMap, targetPath)
+
+	targetStat, err := os.Stat(targetPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// target does not exist
+			// target must be a directorywith new name
+			err = os.MkdirAll(targetPath, 0766)
+			if err != nil {
+				return xerrors.Errorf("failed to make a directory %q: %w", targetPath, err)
+			}
+
+			now := time.Now()
+			reportFile := &commons.TransferReportFile{
+				Method:     commons.TransferMethodGet,
+				StartAt:    now,
+				EndAt:      now,
+				SourcePath: sourceEntry.Path,
+				DestPath:   targetPath,
+				Notes:      []string{"directory"},
+			}
+
+			get.transferReportManager.AddFile(reportFile)
+		} else {
+			return xerrors.Errorf("failed to stat %q: %w", targetPath, err)
+		}
+	} else {
+		// target exists
+		if !targetStat.IsDir() {
+			return commons.NewNotDirError(targetPath)
+		}
+	}
+
+	// get entries
+	entries, err := get.filesystem.List(sourceEntry.Path)
+	if err != nil {
+		return xerrors.Errorf("failed to list a directory %q: %w", sourceEntry.Path, err)
+	}
+
+	for _, entry := range entries {
+		newEntryPath := commons.MakeTargetLocalFilePath(entry.Path, targetPath)
+
+		if entry.IsDir() {
+			// dir
+			err = get.getDir(entry, newEntryPath)
+			if err != nil {
+				return err
 			}
 		} else {
-			fileExist = true
-		}
-
-		getTask := func(job *commons.ParallelJob) error {
-			manager := job.GetManager()
-			fs := manager.GetFilesystem()
-
-			callbackGet := func(processed int64, total int64) {
-				job.Progress(processed, total, false)
-			}
-
-			job.Progress(0, sourceEntry.Size, false)
-
-			logger.Debugf("downloading file %s to %s", sourcePath, targetFilePath)
-
-			var downloadErr error
-			if parallelTransferFlagValues.ThreadNumber == 1 {
-				_, downloadErr = fs.DownloadFileResumable(sourcePath, "", targetFilePath, true, callbackGet)
-			} else if parallelTransferFlagValues.RedirectToResource {
-				_, downloadErr = fs.DownloadFileRedirectToResource(sourcePath, "", targetFilePath, 0, true, callbackGet)
-			} else if parallelTransferFlagValues.Icat {
-				_, downloadErr = fs.DownloadFileParallelResumable(sourcePath, "", targetFilePath, 0, true, callbackGet)
-			} else {
-				// auto
-				if sourceEntry.Size >= commons.RedirectToResourceMinSize {
-					// redirect-to-resource
-					_, downloadErr = fs.DownloadFileRedirectToResource(sourcePath, "", targetFilePath, 0, true, callbackGet)
-				} else {
-					_, downloadErr = fs.DownloadFileParallelResumable(sourcePath, "", targetFilePath, 0, true, callbackGet)
-				}
-			}
-
-			if downloadErr != nil {
-				job.Progress(-1, sourceEntry.Size, true)
-				return xerrors.Errorf("failed to download %s to %s: %w", sourcePath, targetFilePath, downloadErr)
-			}
-
-			logger.Debugf("downloaded file %s to %s", sourcePath, targetFilePath)
-			job.Progress(sourceEntry.Size, sourceEntry.Size, false)
-			return nil
-		}
-
-		if fileExist {
-			if !forceFlagValues.Force {
-				if targetEntry.Size() == sourceEntry.Size {
-					if len(sourceEntry.CheckSum) > 0 {
-						// compare hash
-						hash, err := irodsclient_util.HashLocalFile(targetFilePath, string(sourceEntry.CheckSumAlgorithm))
-						if err != nil {
-							return xerrors.Errorf("failed to get hash of %s: %w", targetFilePath, err)
-						}
-
-						if bytes.Equal(sourceEntry.CheckSum, hash) {
-							fmt.Printf("skip downloading file %s. The file with the same hash already exists!\n", targetFilePath)
-							return nil
-						}
-					}
-				}
-			}
-		}
-
-		threadsRequired := irodsclient_util.GetNumTasksForParallelTransfer(sourceEntry.Size)
-		parallelJobManager.Schedule(sourcePath, getTask, threadsRequired, progress.UnitsBytes)
-		logger.Debugf("scheduled file download %s to %s", sourcePath, targetFilePath)
-	} else {
-		// dir
-		_, err := os.Stat(targetPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return irodsclient_types.NewFileNotFoundError(targetPath)
-			}
-
-			return xerrors.Errorf("failed to stat dir %s: %w", targetPath, err)
-		}
-
-		logger.Debugf("downloading dir %s to %s", sourcePath, targetPath)
-
-		entries, err := filesystem.List(sourceEntry.Path)
-		if err != nil {
-			return xerrors.Errorf("failed to list dir %s: %w", sourceEntry.Path, err)
-		}
-
-		// make target dir
-		targetDir := filepath.Join(targetPath, sourceEntry.Name)
-		err = os.MkdirAll(targetDir, 0766)
-		if err != nil {
-			return xerrors.Errorf("failed to make dir %s: %w", targetDir, err)
-		}
-
-		for idx := range entries {
-			path := entries[idx].Path
-
-			err = getOne(parallelJobManager, path, targetDir, forceFlagValues, parallelTransferFlagValues)
+			// file
+			err = get.getFile(entry, "", newEntryPath)
 			if err != nil {
-				return xerrors.Errorf("failed to get %s to %s: %w", path, targetDir, err)
+				return err
 			}
 		}
 	}
+
 	return nil
 }

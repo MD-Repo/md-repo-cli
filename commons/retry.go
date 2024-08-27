@@ -1,9 +1,9 @@
 package commons
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -26,10 +26,10 @@ func RunWithRetry(retry int, retryInterval int) error {
 		}
 
 		logger.Errorf("%+v", err)
-		fmt.Fprintf(os.Stderr, "Error: %+v\n", err)
+		PrintErrorf("%+v\n", err)
 
 		logger.Errorf("Waiting %d seconds for next try...", retryInterval)
-		fmt.Fprintf(os.Stderr, "Waiting %d seconds for next try...", retryInterval)
+		PrintErrorf("Waiting %d seconds for next try...", retryInterval)
 
 		sleepTime := time.Duration(retryInterval * int(time.Second))
 		time.Sleep(sleepTime)
@@ -55,12 +55,40 @@ func runChild() error {
 	}
 
 	bin := os.Args[0]
-	args := os.Args[1:]
 
 	newArgs := []string{}
-	newArgs = append(newArgs, "--retry_child")
-	newArgs = append(newArgs, args...)
-	newArgs = append(newArgs, "--force")
+	hasForce := false
+	hasRetryChild := false
+	ignoreArgs := 0
+	for _, arg := range os.Args[1:] {
+		if ignoreArgs > 0 {
+			ignoreArgs--
+			continue
+		}
+		if strings.HasPrefix(arg, "--retry=") {
+			// ignore
+			continue
+		}
+		if arg == "--retry" {
+			ignoreArgs = 1
+			continue
+		}
+		if arg == "--force" || arg == "-f" {
+			hasForce = true
+		}
+		if arg == "--retry_child" {
+			hasRetryChild = true
+		}
+
+		newArgs = append(newArgs, arg)
+	}
+
+	if !hasRetryChild {
+		newArgs = append(newArgs, "--retry_child")
+	}
+	if !hasForce {
+		newArgs = append(newArgs, "--force")
+	}
 
 	cmd := exec.Command(bin, newArgs...)
 	cmd.Stdout = os.Stdout

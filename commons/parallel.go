@@ -20,7 +20,6 @@ type ParallelJob struct {
 	task            ParallelJobTask
 	threadsRequired int
 	progressUnit    progress.Units
-	lastError       error
 
 	done bool
 }
@@ -45,7 +44,6 @@ func newParallelJob(manager *ParallelJobManager, index int64, name string, task 
 		task:            task,
 		threadsRequired: threadsRequired,
 		progressUnit:    progressUnit,
-		lastError:       nil,
 
 		done: false,
 	}
@@ -57,6 +55,7 @@ type ParallelJobManager struct {
 	pendingJobs             chan *ParallelJob
 	maxThreads              int
 	showProgress            bool
+	showFullPath            bool
 	progressWriter          progress.Writer
 	progressTrackers        map[string]*progress.Tracker
 	progressTrackerCallback ProgressTrackerCallback
@@ -72,13 +71,14 @@ type ParallelJobManager struct {
 }
 
 // NewParallelJobManager creates a new ParallelJobManager
-func NewParallelJobManager(fs *irodsclient_fs.FileSystem, maxThreads int, showProgress bool) *ParallelJobManager {
+func NewParallelJobManager(fs *irodsclient_fs.FileSystem, maxThreads int, showProgress bool, showFullPath bool) *ParallelJobManager {
 	manager := &ParallelJobManager{
 		filesystem:              fs,
 		nextJobIndex:            0,
 		pendingJobs:             make(chan *ParallelJob, 100),
 		maxThreads:              maxThreads,
 		showProgress:            showProgress,
+		showFullPath:            showFullPath,
 		progressWriter:          nil,
 		progressTrackers:        map[string]*progress.Tracker{},
 		progressTrackerCallback: nil,
@@ -160,7 +160,7 @@ func (manager *ParallelJobManager) Wait() error {
 	}
 
 	if manager.jobsDoneCounter != manager.jobsScheduledCounter {
-		return xerrors.Errorf("jobs '%d/%d' were canceled!", manager.jobsDoneCounter, manager.jobsScheduledCounter)
+		return xerrors.Errorf("jobs '%d/%d' were not completed!", manager.jobsDoneCounter, manager.jobsScheduledCounter)
 	}
 
 	return nil
@@ -181,7 +181,10 @@ func (manager *ParallelJobManager) startProgress() {
 			var tracker *progress.Tracker
 			if t, ok := manager.progressTrackers[name]; !ok {
 				// created a new tracker if not exists
-				msg := GetShortPathMessage(name, messageWidth)
+				msg := name
+				if !manager.showFullPath {
+					msg = GetShortPathMessage(name, messageWidth)
+				}
 
 				tracker = &progress.Tracker{
 					Message: msg,
@@ -272,7 +275,7 @@ func (manager *ParallelJobManager) Start() {
 				logger.Debugf("# threads : %d, max %d", currentThreads, manager.maxThreads)
 
 				go func(pjob *ParallelJob) {
-					logger.Debugf("Run job %d, %s", pjob.index, pjob.name)
+					logger.Debugf("Run job %d, %q", pjob.index, pjob.name)
 
 					err := pjob.task(pjob)
 
@@ -289,11 +292,12 @@ func (manager *ParallelJobManager) Start() {
 					currentThreads -= pjob.threadsRequired
 					logger.Debugf("# threads : %d, max %d", currentThreads, manager.maxThreads)
 
-					manager.jobWait.Done()
 					if pjob.done {
 						// increase jobs done counter
 						atomic.AddInt64(&manager.jobsDoneCounter, 1)
 					}
+
+					manager.jobWait.Done()
 
 					manager.mutex.Lock()
 					manager.availableThreadWaitCondition.Broadcast()

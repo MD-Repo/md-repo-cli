@@ -1,10 +1,8 @@
 package commons
 
 import (
-	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	"golang.org/x/xerrors"
@@ -59,11 +57,9 @@ func InputMissingFields() (bool, error) {
 	if len(appConfig.TicketString) == 0 && len(appConfig.Token) == 0 {
 		token := appConfig.Token
 		for len(token) == 0 {
-			fmt.Print("Input token: ")
-			fmt.Scanln(&token)
-
+			token = Input("Input token")
 			if len(token) == 0 {
-				fmt.Println("Error! Please type token.")
+				PrintErrorf("Error! Please type token.")
 			} else {
 				updated = true
 				appConfig.Token = token
@@ -92,39 +88,12 @@ func InputMissingFieldsFromStdin() error {
 	return nil
 }
 
-// InputYN inputs Y or N
-// true for Y, false for N
-func InputYN(msg string) bool {
-	userInput := ""
-
-	for {
-		fmt.Printf("%s [y/n]: ", msg)
-
-		fmt.Scanln(&userInput)
-		userInput = strings.ToLower(userInput)
-
-		if userInput == "y" || userInput == "yes" {
-			return true
-		} else if userInput == "n" || userInput == "no" {
-			return false
-		}
-	}
-}
-
 // InputOrcID inputs ORCID
 func InputOrcID() string {
-	var orcID string
-	fmt.Print("Input ORC-ID: ")
-	fmt.Scanln(&orcID)
-
-	return orcID
+	return Input("Input ORC-ID")
 }
 
 // InputSimulationNo inputs simulation no
 func InputSimulationNo() int {
-	var simulationNo int
-	fmt.Print("Number of simulations expected: ")
-	fmt.Scanln(&simulationNo)
-
-	return simulationNo
+	return InputInt("Number of simulations expected")
 }

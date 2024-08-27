@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/creativeprojects/go-selfupdate v1.1.0
-	github.com/cyverse/go-irodsclient v0.14.13
+	github.com/cyverse/go-irodsclient v0.14.15-0.20240826183642-fbe8e965e764
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/jedib0t/go-pretty/v6 v6.4.6
 	github.com/sirupsen/logrus v1.9.3

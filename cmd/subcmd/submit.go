@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/commons"
-	"github.com/cyverse/go-irodsclient/fs"
+	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	irodsclient_util "github.com/cyverse/go-irodsclient/irods/util"
 	"github.com/jedib0t/go-pretty/v6/progress"
@@ -32,16 +34,254 @@ func AddSubmitCommand(rootCmd *cobra.Command) {
 	// attach common flags
 	flag.SetCommonFlags(submitCmd)
 
+	flag.SetSubmissionFlags(submitCmd)
 	flag.SetTokenFlags(submitCmd)
 	flag.SetForceFlags(submitCmd, true)
-	flag.SetParallelTransferFlags(submitCmd)
+	flag.SetParallelTransferFlags(submitCmd, true)
 	flag.SetProgressFlags(submitCmd)
 	flag.SetRetryFlags(submitCmd)
+	flag.SetTransferReportFlags(submitCmd)
 
 	rootCmd.AddCommand(submitCmd)
 }
 
-func checkValidSourcePath(sourcePath string) error {
+func processSubmitCommand(command *cobra.Command, args []string) error {
+	submit, err := NewSubmitCommand(command, args)
+	if err != nil {
+		return err
+	}
+
+	return submit.Process()
+}
+
+type SubmitCommand struct {
+	command *cobra.Command
+
+	submissionFlagValues       *flag.SubmissionFlagValues
+	tokenFlagValues            *flag.TokenFlagValues
+	forceFlagValues            *flag.ForceFlagValues
+	parallelTransferFlagValues *flag.ParallelTransferFlagValues
+	progressFlagValues         *flag.ProgressFlagValues
+	retryFlagValues            *flag.RetryFlagValues
+	transferReportFlagValues   *flag.TransferReportFlagValues
+
+	maxConnectionNum int
+
+	account    *irodsclient_types.IRODSAccount
+	filesystem *irodsclient_fs.FileSystem
+
+	sourcePaths []string
+
+	parallelJobManager    *commons.ParallelJobManager
+	transferReportManager *commons.TransferReportManager
+	submitStatusFile      *commons.SubmitStatusFile
+	updatedPathMap        map[string]bool
+}
+
+func NewSubmitCommand(command *cobra.Command, args []string) (*SubmitCommand, error) {
+	submit := &SubmitCommand{
+		command: command,
+
+		submissionFlagValues:       flag.GetSubmissionFlagValues(),
+		tokenFlagValues:            flag.GetTokenFlagValues(),
+		forceFlagValues:            flag.GetForceFlagValues(),
+		parallelTransferFlagValues: flag.GetParallelTransferFlagValues(),
+		progressFlagValues:         flag.GetProgressFlagValues(),
+		retryFlagValues:            flag.GetRetryFlagValues(),
+		transferReportFlagValues:   flag.GetTransferReportFlagValues(command),
+
+		updatedPathMap: map[string]bool{},
+	}
+
+	submit.maxConnectionNum = submit.parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
+
+	// path
+	submit.sourcePaths = args
+
+	return submit, nil
+}
+
+func (submit *SubmitCommand) Process() error {
+	logger := log.WithFields(log.Fields{
+		"package":  "subcmd",
+		"struct":   "SubmitCommand",
+		"function": "Process",
+	})
+
+	cont, err := flag.ProcessCommonFlags(submit.command)
+	if err != nil {
+		return xerrors.Errorf("failed to process common flags: %w", err)
+	}
+
+	if !cont {
+		return nil
+	}
+
+	config := commons.GetConfig()
+
+	// handle token
+	if len(submit.tokenFlagValues.TicketString) > 0 {
+		config.TicketString = submit.tokenFlagValues.TicketString
+	}
+
+	if len(submit.tokenFlagValues.Token) > 0 {
+		config.Token = submit.tokenFlagValues.Token
+	}
+
+	// handle local flags
+	_, err = commons.InputMissingFields()
+	if err != nil {
+		return xerrors.Errorf("failed to input missing fields: %w", err)
+	}
+
+	validSourcePaths, invalidSourcePaths, orcID, err := submit.scanSourcePaths(submit.submissionFlagValues.OrcID)
+	if err != nil {
+		return xerrors.Errorf("failed to scan source paths: %w", err)
+	}
+
+	if !submit.retryFlagValues.RetryChild {
+		// only parent has input
+		expectedSimulationNo := 0
+		if submit.submissionFlagValues.ExpectedSimulations > 0 {
+			expectedSimulationNo = submit.submissionFlagValues.ExpectedSimulations
+		} else {
+			expectedSimulationNo = commons.InputSimulationNo()
+		}
+
+		if expectedSimulationNo != len(validSourcePaths) {
+			logger.Debugf("we found %d simulations, but expected %d simulations", len(validSourcePaths), expectedSimulationNo)
+
+			logger.Debugf("the simulations found:")
+			for sourceIdx, sourcePath := range validSourcePaths {
+				logger.Debugf("[%d] %s", sourceIdx+1, sourcePath)
+			}
+
+			logger.Debugf("the directories ignored due to lack of metadata file:")
+			for sourceIdx, sourcePath := range invalidSourcePaths {
+				logger.Debugf("[%d] %s", sourceIdx+1, sourcePath)
+			}
+
+			return commons.NewSimulationNoNotMatchingError(validSourcePaths, invalidSourcePaths, expectedSimulationNo)
+		}
+
+		if len(orcID) == 0 {
+			orcID = commons.InputOrcID()
+		}
+	}
+
+	if len(config.Token) > 0 && len(config.TicketString) == 0 {
+		// encrypt
+		tokenBytes, err := commons.Base64Decode(config.Token)
+		if err != nil {
+			return xerrors.Errorf("failed to decode token using BASE64: %w", err)
+		}
+
+		newToken, err := commons.HMACStringSHA224(tokenBytes, orcID)
+		if err != nil {
+			return xerrors.Errorf("failed to encrypt token using SHA3-224 HMAC: %w", err)
+		}
+
+		logger.Debugf("encrypted token: %s", newToken)
+
+		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(submit.tokenFlagValues.ServiceURL, newToken)
+		if err != nil {
+			return xerrors.Errorf("failed to read ticket from token: %w", err)
+		}
+	}
+
+	if len(config.TicketString) == 0 {
+		return commons.TokenNotProvidedError
+	}
+
+	// verify metadatas
+	invalidErr := commons.VerifySubmitMetadata(validSourcePaths, submit.tokenFlagValues.ServiceURL, config.Token)
+	if invalidErr != nil {
+		return invalidErr
+	} else {
+		logger.Debugf("all submit metadata are valid")
+	}
+
+	// handle retry
+	if submit.retryFlagValues.RetryNumber > 0 && !submit.retryFlagValues.RetryChild {
+		err = commons.RunWithRetry(submit.retryFlagValues.RetryNumber, submit.retryFlagValues.RetryIntervalSeconds)
+		if err != nil {
+			return xerrors.Errorf("failed to run with retry %d: %w", submit.retryFlagValues.RetryNumber, err)
+		}
+		return nil
+	}
+
+	// get ticket
+	mdRepoTickets, err := commons.GetMDRepoTicketsFromString(config.TicketString)
+	if err != nil {
+		return xerrors.Errorf("failed to retrieve tickets: %w", err)
+	}
+
+	if len(mdRepoTickets) != len(validSourcePaths) {
+		logger.Debugf("we found %d simulations, but we got %d tokens", len(mdRepoTickets), len(validSourcePaths))
+	}
+
+	for ticketIdx, mdRepoTicket := range mdRepoTickets {
+		sourcePath := validSourcePaths[ticketIdx]
+		targetPath := commons.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
+
+		// we create filesystem, job manager for every ticket as they require separate auth
+		// Create a file system
+		submit.account, err = commons.GetAccount(&mdRepoTicket)
+		if err != nil {
+			return xerrors.Errorf("failed to get iRODS Account: %w", err)
+		}
+
+		submit.filesystem, err = commons.GetIRODSFSClientAdvanced(submit.account, submit.maxConnectionNum, submit.parallelTransferFlagValues.TCPBufferSize)
+		if err != nil {
+			return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
+		}
+		defer submit.filesystem.Release()
+
+		// parallel job manager
+		submit.parallelJobManager = commons.NewParallelJobManager(submit.filesystem, submit.parallelTransferFlagValues.ThreadNumber, !submit.progressFlagValues.NoProgress, false)
+		submit.parallelJobManager.Start()
+
+		// submit status file
+		submit.submitStatusFile = commons.NewSubmitStatusFile()
+		submit.submitStatusFile.Token = config.Token
+
+		// run
+		err = submit.submitOne(mdRepoTicket, sourcePath, targetPath)
+		if err != nil {
+			submit.submitStatusFile.SetErrored()
+			submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
+			return xerrors.Errorf("failed to submit %q to %q: %w", sourcePath, targetPath, err)
+		}
+
+		// create a status file
+		submit.submitStatusFile.SetInProgress()
+		err = submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
+		if err != nil {
+			return xerrors.Errorf("failed to create status file on %q: %w", targetPath, err)
+		}
+
+		// release parallel job manager
+		submit.parallelJobManager.DoneScheduling()
+
+		err = submit.parallelJobManager.Wait()
+		if err != nil {
+			submit.submitStatusFile.SetErrored()
+			submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
+			return xerrors.Errorf("failed to perform parallel jobs: %w", err)
+		}
+
+		// status file
+		submit.submitStatusFile.SetCompleted()
+		err = submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
+		if err != nil {
+			return xerrors.Errorf("failed to create status file on %s: %w", targetPath, err)
+		}
+	}
+
+	return nil
+}
+
+func (submit *SubmitCommand) checkValidSourcePath(sourcePath string) error {
 	st, err := os.Stat(sourcePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -77,11 +317,11 @@ func checkValidSourcePath(sourcePath string) error {
 }
 
 // scanSourcePaths scans source paths and return valid sources only
-func scanSourcePaths(sourcePaths []string, orcID string) ([]string, []string, string, error) {
+func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, string, error) {
 	validSourcePaths := []string{}
 	invalidSourcePaths := []string{}
 
-	for _, sourcePath := range sourcePaths {
+	for _, sourcePath := range submit.sourcePaths {
 		sourcePath = commons.MakeLocalPath(sourcePath)
 
 		st, stErr := os.Stat(sourcePath)
@@ -97,7 +337,7 @@ func scanSourcePaths(sourcePaths []string, orcID string) ([]string, []string, st
 			return nil, nil, "", xerrors.Errorf("source %s is file", sourcePath)
 		}
 
-		err := checkValidSourcePath(sourcePath)
+		err := submit.checkValidSourcePath(sourcePath)
 		if err == nil {
 			// valid
 			validSourcePaths = append(validSourcePaths, sourcePath)
@@ -116,7 +356,7 @@ func scanSourcePaths(sourcePaths []string, orcID string) ([]string, []string, st
 				hasSubDirs = true
 
 				entryPath := filepath.Join(sourcePath, dirEntry.Name())
-				chkErr := checkValidSourcePath(entryPath)
+				chkErr := submit.checkValidSourcePath(entryPath)
 				if chkErr == nil {
 					// valid
 					validSourcePaths = append(validSourcePaths, entryPath)
@@ -165,208 +405,14 @@ func scanSourcePaths(sourcePaths []string, orcID string) ([]string, []string, st
 	return validSourcePaths, invalidSourcePaths, orcIDFound, nil
 }
 
-func processSubmitCommand(command *cobra.Command, args []string) error {
+func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, sourcePath string, targetPath string) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "subcmd",
-		"function": "processSubmitCommand",
-	})
-
-	cont, err := flag.ProcessCommonFlags(command)
-	if err != nil {
-		return xerrors.Errorf("failed to process common flags: %w", err)
-	}
-
-	if !cont {
-		return nil
-	}
-
-	tokenFlagValues := flag.GetTokenFlagValues()
-	forceFlagValues := flag.GetForceFlagValues()
-	parallelTransferFlagValues := flag.GetParallelTransferFlagValues()
-	progressFlagValues := flag.GetProgressFlagValues()
-	retryFlagValues := flag.GetRetryFlagValues()
-	submissionFlagValues := flag.GetSubmissionFlagValues()
-
-	maxConnectionNum := parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
-
-	config := commons.GetConfig()
-
-	// handle token
-	if len(tokenFlagValues.TicketString) > 0 {
-		config.TicketString = tokenFlagValues.TicketString
-	}
-
-	if len(tokenFlagValues.Token) > 0 {
-		config.Token = tokenFlagValues.Token
-	}
-
-	// handle local flags
-	_, err = commons.InputMissingFields()
-	if err != nil {
-		return xerrors.Errorf("failed to input missing fields: %w", err)
-	}
-
-	sourcePaths := args[0:]
-	validSourcePaths, invalidSourcePaths, orcID, err := scanSourcePaths(sourcePaths, submissionFlagValues.OrcID)
-	if err != nil {
-		return xerrors.Errorf("failed to scan source paths: %w", err)
-	}
-
-	if !retryFlagValues.RetryChild {
-		// only parent has input
-		expectedSimulationNo := 0
-		if submissionFlagValues.ExpectedSimulations > 0 {
-			expectedSimulationNo = submissionFlagValues.ExpectedSimulations
-		} else {
-			expectedSimulationNo = commons.InputSimulationNo()
-		}
-
-		if expectedSimulationNo != len(validSourcePaths) {
-			logger.Debugf("we found %d simulations, but expected %d simulations", len(validSourcePaths), expectedSimulationNo)
-
-			logger.Debugf("the simulations found:")
-			for sourceIdx, sourcePath := range validSourcePaths {
-				logger.Debugf("[%d] %s", sourceIdx+1, sourcePath)
-			}
-
-			logger.Debugf("the directories ignored due to lack of metadata file:")
-			for sourceIdx, sourcePath := range invalidSourcePaths {
-				logger.Debugf("[%d] %s", sourceIdx+1, sourcePath)
-			}
-
-			return commons.NewSimulationNoNotMatchingError(validSourcePaths, invalidSourcePaths, expectedSimulationNo)
-		}
-
-		if len(orcID) == 0 {
-			orcID = commons.InputOrcID()
-		}
-	}
-
-	if len(config.Token) > 0 && len(config.TicketString) == 0 {
-		// encrypt
-		tokenBytes, err := commons.Base64Decode(config.Token)
-		if err != nil {
-			return xerrors.Errorf("failed to decode token using BASE64: %w", err)
-		}
-
-		newToken, err := commons.HMACStringSHA224(tokenBytes, orcID)
-		if err != nil {
-			return xerrors.Errorf("failed to encrypt token using SHA3-224 HMAC: %w", err)
-		}
-
-		logger.Debugf("encrypted token: %s", newToken)
-
-		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(tokenFlagValues.ServiceURL, newToken)
-		if err != nil {
-			return xerrors.Errorf("failed to read ticket from token: %w", err)
-		}
-	}
-
-	if len(config.TicketString) == 0 {
-		return commons.TokenNotProvidedError
-	}
-
-	// verify metadatas
-	invalidErr := commons.VerifySubmitMetadata(validSourcePaths, tokenFlagValues.ServiceURL, config.Token)
-	if invalidErr != nil {
-		return invalidErr
-	} else {
-		logger.Debugf("all submit metadata are valid")
-	}
-
-	if retryFlagValues.RetryNumber > 0 && !retryFlagValues.RetryChild {
-		err = commons.RunWithRetry(retryFlagValues.RetryNumber, retryFlagValues.RetryIntervalSeconds)
-		if err != nil {
-			return xerrors.Errorf("failed to run with retry %d: %w", retryFlagValues.RetryNumber, err)
-		}
-		return nil
-	}
-
-	mdRepoTickets, err := commons.GetMDRepoTicketsFromString(config.TicketString)
-	if err != nil {
-		return xerrors.Errorf("failed to retrieve tickets: %w", err)
-	}
-
-	if len(mdRepoTickets) != len(validSourcePaths) {
-		logger.Debugf("we found %d simulations, but we got %d tokens", len(mdRepoTickets), len(validSourcePaths))
-	}
-
-	for ticketIdx, mdRepoTicket := range mdRepoTickets {
-		sourcePath := validSourcePaths[ticketIdx]
-		targetPath := commons.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
-
-		// display
-		logger.Debugf("submission iRODS ticket: %s", mdRepoTicket.IRODSTicket)
-		logger.Debugf("submission %s => %s", sourcePath, targetPath)
-
-		// Create a file system
-		account, err := commons.GetAccount(&mdRepoTicket)
-		if err != nil {
-			return xerrors.Errorf("failed to get iRODS Account: %w", err)
-		}
-
-		filesystem, err := commons.GetIRODSFSClientAdvanced(account, maxConnectionNum, parallelTransferFlagValues.TCPBufferSize)
-		if err != nil {
-			return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
-		}
-
-		submitStatusFile := commons.NewSubmitStatusFile()
-		submitStatusFile.Token = config.Token
-
-		parallelJobManager := commons.NewParallelJobManager(filesystem, parallelTransferFlagValues.ThreadNumber, !progressFlagValues.NoProgress)
-		parallelJobManager.Start()
-
-		err = submitOne(parallelJobManager, submitStatusFile, sourcePath, targetPath, forceFlagValues, parallelTransferFlagValues)
-		if err != nil {
-			submitStatusFile.SetErrored()
-			submitStatusFile.CreateStatusFile(filesystem, targetPath)
-			filesystem.Release()
-
-			return xerrors.Errorf("failed to submit %s to %s: %w", sourcePath, targetPath, err)
-		}
-
-		parallelJobManager.DoneScheduling()
-
-		// status file
-		submitStatusFile.SetInProgress()
-		err = submitStatusFile.CreateStatusFile(filesystem, targetPath)
-		if err != nil {
-			filesystem.Release()
-
-			return xerrors.Errorf("failed to create status file on %s: %w", targetPath, err)
-		}
-
-		err = parallelJobManager.Wait()
-		if err != nil {
-			submitStatusFile.SetErrored()
-			submitStatusFile.CreateStatusFile(filesystem, targetPath)
-			filesystem.Release()
-
-			return xerrors.Errorf("failed to perform parallel jobs: %w", err)
-		}
-
-		// status file
-		submitStatusFile.SetCompleted()
-		err = submitStatusFile.CreateStatusFile(filesystem, targetPath)
-		if err != nil {
-			filesystem.Release()
-
-			return xerrors.Errorf("failed to create status file on %s: %w", targetPath, err)
-		}
-
-		filesystem.Release()
-	}
-
-	return nil
-}
-
-func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile *commons.SubmitStatusFile, sourcePath string, targetPath string, forceFlagValues *flag.ForceFlagValues, parallelTransferFlagValues *flag.ParallelTransferFlagValues) error {
-	logger := log.WithFields(log.Fields{
-		"package":  "subcmd",
+		"struct":   "SubmitCommand",
 		"function": "submitOne",
 	})
 
-	filesystem := parallelJobManager.GetFilesystem()
+	logger.Debugf("submit %q to %q (ticket: %q)", sourcePath, targetPath, mdRepoTicket.IRODSTicket)
 
 	sourceStat, err := os.Stat(sourcePath)
 	if err != nil {
@@ -377,134 +423,262 @@ func submitOne(parallelJobManager *commons.ParallelJobManager, submitStatusFile 
 		return xerrors.Errorf("failed to stat %s: %w", sourcePath, err)
 	}
 
-	if !sourceStat.IsDir() {
-		// file
-		targetFilePath := commons.MakeTargetIRODSFilePath(filesystem, sourcePath, targetPath)
+	targetRootPath := targetPath
 
-		fileExist := false
-		targetEntry, err := filesystem.StatFile(targetFilePath)
-		if err != nil {
-			if !irodsclient_types.IsFileNotFoundError(err) {
-				return xerrors.Errorf("failed to stat %s: %w", targetFilePath, err)
-			}
-		} else {
-			fileExist = true
-		}
-
-		putTask := func(job *commons.ParallelJob) error {
-			manager := job.GetManager()
-			fs := manager.GetFilesystem()
-
-			callbackPut := func(processed int64, total int64) {
-				job.Progress(processed, total, false)
-			}
-
-			job.Progress(0, sourceStat.Size(), false)
-
-			logger.Debugf("uploading file %s to %s", sourcePath, targetFilePath)
-
-			var uploadErr error
-			if parallelTransferFlagValues.ThreadNumber == 1 {
-				_, uploadErr = fs.UploadFile(sourcePath, targetFilePath, "", false, true, true, callbackPut)
-			} else if parallelTransferFlagValues.RedirectToResource {
-				_, uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", 0, false, true, true, callbackPut)
-			} else if parallelTransferFlagValues.Icat {
-				_, uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, true, true, callbackPut)
-			} else {
-				// auto
-				if sourceStat.Size() >= commons.RedirectToResourceMinSize {
-					// redirect-to-resource
-					_, uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", 0, false, true, true, callbackPut)
-				} else {
-					if filesystem.SupportParallelUpload() {
-						_, uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, true, true, callbackPut)
-					} else {
-						if sourceStat.Size() >= commons.ParallelUploadMinSize {
-							// does not support parall upload via iCAT
-							// redirect-to-resource
-							_, uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetFilePath, "", 0, false, true, true, callbackPut)
-						} else {
-							_, uploadErr = fs.UploadFileParallel(sourcePath, targetFilePath, "", 0, false, true, true, callbackPut)
-						}
-					}
-				}
-			}
-
-			if uploadErr != nil {
-				job.Progress(-1, sourceStat.Size(), true)
-				return xerrors.Errorf("failed to upload %s to %s: %w", sourcePath, targetFilePath, uploadErr)
-			}
-
-			logger.Debugf("uploaded file %s to %s", sourcePath, targetFilePath)
-			job.Progress(sourceStat.Size(), sourceStat.Size(), false)
-
-			job.Done()
-			return nil
-		}
-
-		hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5")
-		if err != nil {
-			return xerrors.Errorf("failed to get hash for %s: %w", sourcePath, err)
-		}
-
-		targetFileRelPath := targetFilePath
-		if strings.HasPrefix(targetFilePath, fmt.Sprintf("%s/", targetPath)) {
-			targetFileRelPath = targetFilePath[len(targetPath)+1:]
-		}
-
-		submitStatusEntry := commons.SubmitStatusEntry{
-			IRODSPath: targetFileRelPath, // store relative path
-			Size:      sourceStat.Size(),
-			MD5Hash:   hex.EncodeToString(hash),
-		}
-		submitStatusFile.AddFile(submitStatusEntry)
-
-		if fileExist {
-			if !forceFlagValues.Force {
-				if targetEntry.Size == sourceStat.Size() {
-					if len(targetEntry.CheckSum) > 0 {
-						// compare hash
-						if bytes.Equal(hash, targetEntry.CheckSum) {
-							fmt.Printf("skip uploading file %s. The file with the same hash already exists!\n", targetFilePath)
-							return nil
-						}
-					}
-				}
-			}
-		}
-
-		threadsRequired := computeThreadsRequiredForSubmit(filesystem, sourceStat.Size())
-		parallelJobManager.Schedule(sourcePath, putTask, threadsRequired, progress.UnitsBytes)
-		logger.Debugf("scheduled local file upload %s to %s", sourcePath, targetFilePath)
-	} else {
+	if sourceStat.IsDir() {
 		// dir
-		_, err := filesystem.Stat(targetPath)
-		if err != nil {
-			return xerrors.Errorf("failed to stat dir %s: %w", targetPath, err)
+		targetPath = commons.MakeTargetLocalFilePath(sourcePath, targetPath)
+		return submit.submitDir(sourceStat, sourcePath, targetRootPath, targetPath)
+	}
+
+	// file
+	targetPath = commons.MakeTargetIRODSFilePath(submit.filesystem, sourcePath, targetPath)
+	return submit.submitFile(sourceStat, sourcePath, targetRootPath, targetPath)
+}
+
+func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath string, targetRootPath string, targetPath string) error {
+	logger := log.WithFields(log.Fields{
+		"package":  "subcmd",
+		"struct":   "SubmitCommand",
+		"function": "scheduleSubmit",
+	})
+
+	submitTask := func(job *commons.ParallelJob) error {
+		manager := job.GetManager()
+		fs := manager.GetFilesystem()
+
+		callbackSubmit := func(processed int64, total int64) {
+			job.Progress(processed, total, false)
 		}
 
-		logger.Debugf("uploading local directory %s to %s", sourcePath, targetPath)
+		job.Progress(0, sourceStat.Size(), false)
 
-		entries, err := os.ReadDir(sourcePath)
-		if err != nil {
-			return xerrors.Errorf("failed to read dir %s: %w", sourcePath, err)
-		}
+		logger.Debugf("uploading a file %q to %q", sourcePath, targetPath)
 
-		// make target dir
-		for _, entryInDir := range entries {
-			newSourcePath := filepath.Join(sourcePath, entryInDir.Name())
-			err = submitOne(parallelJobManager, submitStatusFile, newSourcePath, targetPath, forceFlagValues, parallelTransferFlagValues)
-			if err != nil {
-				return xerrors.Errorf("failed to perform put %s to %s: %w", newSourcePath, targetPath, err)
+		var uploadErr error
+		var uploadResult *irodsclient_fs.FileTransferResult
+		notes := []string{}
+
+		// determine how to upload
+		if submit.parallelTransferFlagValues.SingleTread || submit.parallelTransferFlagValues.ThreadNumber == 1 {
+			uploadResult, uploadErr = fs.UploadFile(sourcePath, targetPath, "", false, true, true, callbackSubmit)
+			notes = append(notes, "icat", "single-thread")
+		} else if submit.parallelTransferFlagValues.RedirectToResource {
+			uploadResult, uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetPath, "", 0, false, true, true, callbackSubmit)
+			notes = append(notes, "redirect-to-resource")
+		} else if submit.parallelTransferFlagValues.Icat {
+			uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", 0, false, true, true, callbackSubmit)
+			notes = append(notes, "icat", "multi-thread")
+		} else {
+			// auto
+			if sourceStat.Size() >= commons.RedirectToResourceMinSize {
+				// redirect-to-resource
+				uploadResult, uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetPath, "", 0, false, true, true, callbackSubmit)
+				notes = append(notes, "redirect-to-resource")
+			} else {
+				uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", 0, false, true, true, callbackSubmit)
+				notes = append(notes, "icat", "multi-thread")
 			}
 		}
+
+		if uploadErr != nil {
+			job.Progress(-1, sourceStat.Size(), true)
+			return xerrors.Errorf("failed to upload %q to %q: %w", sourcePath, targetPath, uploadErr)
+		}
+
+		err := submit.transferReportManager.AddTransfer(uploadResult, commons.TransferMethodPut, uploadErr, notes)
+		if err != nil {
+			job.Progress(-1, sourceStat.Size(), true)
+			return xerrors.Errorf("failed to add transfer report: %w", err)
+		}
+
+		logger.Debugf("uploaded a file %q to %q", sourcePath, targetPath)
+		job.Progress(sourceStat.Size(), sourceStat.Size(), false)
+
+		job.Done()
+		return nil
 	}
+
+	// submit status file
+	hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5")
+	if err != nil {
+		return xerrors.Errorf("failed to get hash for %s: %w", sourcePath, err)
+	}
+
+	targetRelPath := targetPath
+	if strings.HasPrefix(targetPath, fmt.Sprintf("%s/", targetRootPath)) {
+		targetRelPath = targetPath[len(targetRootPath)+1:]
+	}
+
+	submitStatusEntry := commons.SubmitStatusEntry{
+		IRODSPath: targetRelPath,
+		Size:      sourceStat.Size(),
+		MD5Hash:   hex.EncodeToString(hash),
+	}
+	submit.submitStatusFile.AddFile(submitStatusEntry)
+
+	// schedule
+	threadsRequired := submit.computeThreadsRequired(sourceStat.Size())
+	err = submit.parallelJobManager.Schedule(sourcePath, submitTask, threadsRequired, progress.UnitsBytes)
+	if err != nil {
+		return xerrors.Errorf("failed to schedule upload %q to %q: %w", sourcePath, targetPath, err)
+	}
+
+	logger.Debugf("scheduled a file upload %q to %q", sourcePath, targetPath)
+
 	return nil
 }
 
-func computeThreadsRequiredForSubmit(fs *fs.FileSystem, size int64) int {
-	if fs.SupportParallelUpload() {
-		return irodsclient_util.GetNumTasksForParallelTransfer(size)
+func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath string, targetRootPath string, targetPath string) error {
+	logger := log.WithFields(log.Fields{
+		"package":  "subcmd",
+		"struct":   "SubmitCommand",
+		"function": "submitFile",
+	})
+
+	commons.MarkPathMap(submit.updatedPathMap, targetPath)
+
+	targetEntry, err := submit.filesystem.Stat(targetPath)
+	if err != nil {
+		if irodsclient_types.IsFileNotFoundError(err) {
+			// target does not exist
+			// target must be a file with new name
+			return submit.scheduleSubmit(sourceStat, sourcePath, targetRootPath, targetPath)
+		}
+
+		return xerrors.Errorf("failed to stat %q: %w", targetPath, err)
+	}
+
+	// target exists
+	// target must be a file
+	if targetEntry.IsDir() {
+		return commons.NewNotFileError(targetPath)
+	}
+
+	if !submit.forceFlagValues.Force {
+		if targetEntry.Size == sourceStat.Size() {
+			// compare hash
+			if len(targetEntry.CheckSum) > 0 {
+				localChecksum, err := irodsclient_util.HashLocalFile(sourcePath, string(targetEntry.CheckSumAlgorithm))
+				if err != nil {
+					return xerrors.Errorf("failed to get hash for %q: %w", sourcePath, err)
+				}
+
+				if bytes.Equal(localChecksum, targetEntry.CheckSum) {
+					// skip
+					now := time.Now()
+					reportFile := &commons.TransferReportFile{
+						Method:            commons.TransferMethodPut,
+						StartAt:           now,
+						EndAt:             now,
+						SourcePath:        sourcePath,
+						SourceSize:        sourceStat.Size(),
+						SourceChecksum:    hex.EncodeToString(localChecksum),
+						DestPath:          targetEntry.Path,
+						DestSize:          targetEntry.Size,
+						DestChecksum:      hex.EncodeToString(targetEntry.CheckSum),
+						ChecksumAlgorithm: string(targetEntry.CheckSumAlgorithm),
+						Notes:             []string{"differential", "same checksum", "skip"},
+					}
+
+					submit.transferReportManager.AddFile(reportFile)
+
+					commons.Printf("skip uploading a file %q to %q. The file with the same hash already exists!\n", sourcePath, targetPath)
+					logger.Debugf("skip uploading a file %q to %q. The file with the same hash already exists!", sourcePath, targetPath)
+					return nil
+				}
+			}
+		}
+	}
+
+	// schedule
+	return submit.scheduleSubmit(sourceStat, sourcePath, targetRootPath, targetPath)
+}
+
+func (submit *SubmitCommand) submitDir(sourceStat fs.FileInfo, sourcePath string, targetRootPath string, targetPath string) error {
+	commons.MarkPathMap(submit.updatedPathMap, targetPath)
+
+	targetEntry, err := submit.filesystem.Stat(targetPath)
+	if err != nil {
+		if irodsclient_types.IsFileNotFoundError(err) {
+			// target does not exist
+			// target must be a directory with new name
+			err = submit.filesystem.MakeDir(targetPath, true)
+			if err != nil {
+				return xerrors.Errorf("failed to make a collection %q: %w", targetPath, err)
+			}
+
+			now := time.Now()
+			reportFile := &commons.TransferReportFile{
+				Method:     commons.TransferMethodPut,
+				StartAt:    now,
+				EndAt:      now,
+				SourcePath: sourcePath,
+				DestPath:   targetPath,
+				Notes:      []string{"directory"},
+			}
+
+			submit.transferReportManager.AddFile(reportFile)
+		} else {
+			return xerrors.Errorf("failed to stat %q: %w", targetPath, err)
+		}
+	} else {
+		// target exists
+		if !targetEntry.IsDir() {
+			return commons.NewNotDirError(targetPath)
+		}
+	}
+
+	// get entries
+	entries, err := os.ReadDir(sourcePath)
+	if err != nil {
+		return xerrors.Errorf("failed to list a directory %q: %w", sourcePath, err)
+	}
+
+	for _, entry := range entries {
+		newEntryPath := commons.MakeTargetIRODSFilePath(submit.filesystem, entry.Name(), targetPath)
+
+		entryPath := filepath.Join(sourcePath, entry.Name())
+
+		entryStat, err := os.Stat(entryPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return irodsclient_types.NewFileNotFoundError(entryPath)
+			}
+
+			return xerrors.Errorf("failed to stat %q: %w", entryPath, err)
+		}
+
+		if entryStat.IsDir() {
+			// dir
+			err = submit.submitDir(entryStat, entryPath, targetRootPath, newEntryPath)
+			if err != nil {
+				return err
+			}
+		} else {
+			// file
+			err = submit.submitFile(entryStat, entryPath, targetRootPath, newEntryPath)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (submit *SubmitCommand) computeThreadsRequired(size int64) int {
+	if submit.parallelTransferFlagValues.SingleTread {
+		return 1
+	}
+
+	if submit.filesystem.SupportParallelUpload() {
+		numTasks := irodsclient_util.GetNumTasksForParallelTransfer(size)
+		if submit.parallelTransferFlagValues.ThreadNumber < numTasks {
+			return submit.parallelTransferFlagValues.ThreadNumber
+		}
+
+		return numTasks
 	}
 
 	return 1

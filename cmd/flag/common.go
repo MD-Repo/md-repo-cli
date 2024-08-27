@@ -1,8 +1,6 @@
 package flag
 
 import (
-	"fmt"
-
 	"github.com/MD-Repo/md-repo-cli/commons"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -13,6 +11,7 @@ type CommonFlagValues struct {
 	ShowVersion     bool
 	ShowHelp        bool
 	DebugMode       bool
+	Quiet           bool
 	logLevelInput   string
 	LogLevel        log.Level
 	LogLevelUpdated bool
@@ -26,10 +25,13 @@ func SetCommonFlags(command *cobra.Command) {
 	command.Flags().BoolVarP(&commonFlagValues.ShowVersion, "version", "v", false, "Print version")
 	command.Flags().BoolVarP(&commonFlagValues.ShowHelp, "help", "h", false, "Print help")
 	command.Flags().BoolVarP(&commonFlagValues.DebugMode, "debug", "d", false, "Enable debug mode")
+	command.Flags().BoolVarP(&commonFlagValues.Quiet, "quiet", "q", false, "Suppress usual output messages")
 	command.Flags().StringVar(&commonFlagValues.logLevelInput, "log_level", "", "Set log level")
 
-	command.MarkFlagsMutuallyExclusive("debug", "version")
+	command.MarkFlagsMutuallyExclusive("quiet", "version")
 	command.MarkFlagsMutuallyExclusive("log_level", "version")
+	command.MarkFlagsMutuallyExclusive("debug", "quiet", "log_level")
+
 }
 
 func GetCommonFlagValues() *CommonFlagValues {
@@ -45,17 +47,25 @@ func GetCommonFlagValues() *CommonFlagValues {
 	return &commonFlagValues
 }
 
-func ProcessCommonFlags(command *cobra.Command) (bool, error) {
+func setLogLevel(command *cobra.Command) {
 	myCommonFlagValues := GetCommonFlagValues()
-	retryFlagValues := GetRetryFlagValues()
 
-	if myCommonFlagValues.DebugMode {
+	if myCommonFlagValues.Quiet {
+		log.SetLevel(log.FatalLevel)
+	} else if myCommonFlagValues.DebugMode {
 		log.SetLevel(log.DebugLevel)
 	} else {
 		if myCommonFlagValues.LogLevelUpdated {
 			log.SetLevel(myCommonFlagValues.LogLevel)
 		}
 	}
+}
+
+func ProcessCommonFlags(command *cobra.Command) (bool, error) {
+	myCommonFlagValues := GetCommonFlagValues()
+	retryFlagValues := GetRetryFlagValues()
+
+	setLogLevel(command)
 
 	if myCommonFlagValues.ShowHelp {
 		command.Usage()
@@ -93,6 +103,6 @@ func printVersion() error {
 		return xerrors.Errorf("failed to get version json: %w", err)
 	}
 
-	fmt.Println(info)
+	commons.Println(info)
 	return nil
 }

@@ -61,7 +61,7 @@ func ReadOrcIDFromSubmitMetadataString(metadataString string) (string, error) {
 func ReadOrcIDFromSubmitMetadataFile(filePath string) (string, error) {
 	metadataBytes, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", xerrors.Errorf("failed to read submission metadata at %s: %w", filePath, err)
+		return "", xerrors.Errorf("failed to read submission metadata at %q: %w", filePath, err)
 	}
 
 	return ReadOrcIDFromSubmitMetadataString(string(metadataBytes))
@@ -81,13 +81,13 @@ func VerifySubmitMetadata(sourcePaths []string, serviceURL string, token string)
 	apiURL := mdRepoURL + mdRepoVerifyMetadataApi
 	if len(serviceURL) > 0 {
 		if !strings.HasPrefix(serviceURL, "http") {
-			return xerrors.Errorf("failed to make API endpoint URL from non-http/s URL '%s'", serviceURL)
+			return xerrors.Errorf("failed to make API endpoint URL from non-http/s URL %q", serviceURL)
 		}
 
 		apiURL = strings.TrimRight(serviceURL, "/") + mdRepoVerifyMetadataApi
 	}
 
-	logger.Debugf("Requesting to API server at '%s'", apiURL)
+	logger.Debugf("Requesting to API server at %q", apiURL)
 
 	req, err := http.NewRequest("POST", apiURL, nil)
 	if err != nil {
@@ -99,7 +99,7 @@ func VerifySubmitMetadata(sourcePaths []string, serviceURL string, token string)
 		metadataPath := filepath.Join(sourcePath, SubmissionMetadataFilename)
 		metadataBytes, err := os.ReadFile(metadataPath)
 		if err != nil {
-			return xerrors.Errorf("failed to read submit metadata %s: %w", metadataPath, err)
+			return xerrors.Errorf("failed to read submit metadata %q: %w", metadataPath, err)
 		}
 
 		verifyRequest := MDRepoVarifySubmitMetadataRequest{
@@ -138,7 +138,7 @@ func VerifySubmitMetadata(sourcePaths []string, serviceURL string, token string)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return xerrors.Errorf("failed to verify submit metadata, http error %s", resp.Status)
+		return xerrors.Errorf("failed to verify submit metadata, http error %q", resp.Status)
 	}
 
 	verifyResponseBytes, err := io.ReadAll(resp.Body)
@@ -159,13 +159,13 @@ func VerifySubmitMetadata(sourcePaths []string, serviceURL string, token string)
 			if verifyResponse.Errors != nil && len(verifyResponse.Errors) > 0 {
 				// error
 				for _, verifyRespnseError := range verifyResponse.Errors {
-					verifyErrorObj := xerrors.Errorf("%s, path %s: %w", verifyRespnseError, verifyResponse.LocalDataDirPath, InvalidSubmitMetadataError)
+					verifyErrorObj := xerrors.Errorf("%s, path %q: %w", verifyRespnseError, verifyResponse.LocalDataDirPath, InvalidSubmitMetadataError)
 					logger.Error(verifyErrorObj)
 
 					verifyError = multierror.Append(verifyError, verifyErrorObj)
 				}
 			} else {
-				verifyErrorObj := xerrors.Errorf("invalid submit metadata, path %s: %w", verifyResponse.LocalDataDirPath, InvalidSubmitMetadataError)
+				verifyErrorObj := xerrors.Errorf("invalid submit metadata, path %q: %w", verifyResponse.LocalDataDirPath, InvalidSubmitMetadataError)
 				logger.Error(verifyErrorObj)
 
 				verifyError = multierror.Append(verifyError, verifyErrorObj)

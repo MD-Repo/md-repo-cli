@@ -158,7 +158,7 @@ func (submitls *SubmitListCommand) Process() error {
 
 	err = submitls.listOne(sourcePath, sourcePath)
 	if err != nil {
-		return xerrors.Errorf("failed to list %s: %w", sourcePath, err)
+		return xerrors.Errorf("failed to list %q: %w", sourcePath, err)
 	}
 
 	return nil
@@ -174,17 +174,17 @@ func (submitls *SubmitListCommand) listOne(sourceRootPath string, sourcePath str
 	// collection
 	collection, err := irodsclient_irodsfs.GetCollection(connection, sourcePath)
 	if err != nil {
-		return xerrors.Errorf("failed to get collection %s: %w", sourcePath, err)
+		return xerrors.Errorf("failed to get collection %q: %w", sourcePath, err)
 	}
 
 	colls, err := irodsclient_irodsfs.ListSubCollections(connection, sourcePath)
 	if err != nil {
-		return xerrors.Errorf("failed to list sub-collections in %s: %w", sourcePath, err)
+		return xerrors.Errorf("failed to list sub-collections in %q: %w", sourcePath, err)
 	}
 
 	objs, err := irodsclient_irodsfs.ListDataObjects(connection, collection)
 	if err != nil {
-		return xerrors.Errorf("failed to list data-objects in %s: %w", sourcePath, err)
+		return xerrors.Errorf("failed to list data-objects in %q: %w", sourcePath, err)
 	}
 
 	// print text
@@ -198,7 +198,7 @@ func (submitls *SubmitListCommand) listOne(sourceRootPath string, sourcePath str
 		fmt.Printf("\n")
 		err = submitls.listOne(sourceRootPath, coll.Path)
 		if err != nil {
-			return xerrors.Errorf("failed to list %s: %w", coll.Path, err)
+			return xerrors.Errorf("failed to list %q: %w", coll.Path, err)
 		}
 	}
 
@@ -208,7 +208,7 @@ func (submitls *SubmitListCommand) listOne(sourceRootPath string, sourcePath str
 				commons.Printf("\n")
 				err = submitls.catStatusFile(obj.Path)
 				if err != nil {
-					return xerrors.Errorf("failed to cat status file %s: %w", obj.Path, err)
+					return xerrors.Errorf("failed to cat status file %q: %w", obj.Path, err)
 				}
 				break
 			}
@@ -223,7 +223,7 @@ func (submitls *SubmitListCommand) catStatusFile(sourcePath string) error {
 
 	_, err := submitls.filesystem.DownloadFileToBuffer(sourcePath, "", &buffer, true, nil)
 	if err != nil {
-		return xerrors.Errorf("failed to download file %s: %w", sourcePath, err)
+		return xerrors.Errorf("failed to download file %q: %w", sourcePath, err)
 	}
 
 	fmt.Printf("[SUBMISSION STATUS INFO]\n")

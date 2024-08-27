@@ -274,7 +274,7 @@ func (submit *SubmitCommand) Process() error {
 		submit.submitStatusFile.SetCompleted()
 		err = submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
 		if err != nil {
-			return xerrors.Errorf("failed to create status file on %s: %w", targetPath, err)
+			return xerrors.Errorf("failed to create status file on %q: %w", targetPath, err)
 		}
 	}
 
@@ -288,28 +288,28 @@ func (submit *SubmitCommand) checkValidSourcePath(sourcePath string) error {
 			return irodsclient_types.NewFileNotFoundError(sourcePath)
 		}
 
-		return xerrors.Errorf("failed to stat source %s: %w", sourcePath, err)
+		return xerrors.Errorf("failed to stat source %q: %w", sourcePath, err)
 	}
 
 	if !st.IsDir() {
-		return xerrors.Errorf("source %s must be a directory", sourcePath)
+		return commons.NewNotDirError(sourcePath)
 	}
 
 	// check if source path has metadata in it
 	if !commons.HasSubmitMetadataInDir(sourcePath) {
 		// metadata path not exist?
-		return xerrors.Errorf("source %s must have submit metadata", sourcePath)
+		return xerrors.Errorf("source %q must have submit metadata", sourcePath)
 	}
 
 	entries, err := os.ReadDir(sourcePath)
 	if err != nil {
-		return xerrors.Errorf("failed to readdir source %s: %w", sourcePath, err)
+		return xerrors.Errorf("failed to readdir source %q: %w", sourcePath, err)
 	}
 
 	for _, entry := range entries {
 		if entry.IsDir() {
 			// found dir
-			return xerrors.Errorf("source %s has sub directory %s", sourcePath, entry.Name())
+			return commons.NewNotFileError(filepath.Join(sourcePath, entry.Name()))
 		}
 	}
 
@@ -334,7 +334,7 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 		}
 
 		if !st.IsDir() {
-			return nil, nil, "", xerrors.Errorf("source %s is file", sourcePath)
+			return nil, nil, "", commons.NewNotDirError(sourcePath)
 		}
 
 		err := submit.checkValidSourcePath(sourcePath)
@@ -347,7 +347,7 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 		// may have sub dirs?
 		dirEntries, readErr := os.ReadDir(sourcePath)
 		if readErr != nil {
-			return nil, nil, "", xerrors.Errorf("failed to list source %s: %w", sourcePath, readErr)
+			return nil, nil, "", xerrors.Errorf("failed to list source %q: %w", sourcePath, readErr)
 		}
 
 		hasSubDirs := false
@@ -386,11 +386,11 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 	for _, validSourcePath := range validSourcePaths {
 		myOrcID, err := commons.ReadOrcIDFromSubmitMetadataFileInDir(validSourcePath)
 		if err != nil {
-			return nil, nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %s: %w", validSourcePath, err)
+			return nil, nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %q: %w", validSourcePath, err)
 		}
 
 		if len(myOrcID) == 0 {
-			return nil, nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %s: %w", validSourcePath, commons.InvalidOrcIDError)
+			return nil, nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %q: %w", validSourcePath, commons.InvalidOrcIDError)
 		}
 
 		if len(orcIDFound) == 0 {
@@ -398,7 +398,7 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 		}
 
 		if orcIDFound != myOrcID {
-			return nil, nil, "", xerrors.Errorf("Lead Contributor's ORC-ID mismatch for %s, expected %s, but got %s: %w", validSourcePath, orcIDFound, myOrcID, commons.InvalidOrcIDError)
+			return nil, nil, "", xerrors.Errorf("Lead Contributor's ORC-ID mismatch for %q, expected %s, but got %s: %w", validSourcePath, orcIDFound, myOrcID, commons.InvalidOrcIDError)
 		}
 	}
 
@@ -420,7 +420,7 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 			return irodsclient_types.NewFileNotFoundError(sourcePath)
 		}
 
-		return xerrors.Errorf("failed to stat %s: %w", sourcePath, err)
+		return xerrors.Errorf("failed to stat %q: %w", sourcePath, err)
 	}
 
 	targetRootPath := targetPath
@@ -502,7 +502,7 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 	// submit status file
 	hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5")
 	if err != nil {
-		return xerrors.Errorf("failed to get hash for %s: %w", sourcePath, err)
+		return xerrors.Errorf("failed to get hash for %q: %w", sourcePath, err)
 	}
 
 	targetRelPath := targetPath

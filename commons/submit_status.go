@@ -46,7 +46,7 @@ func (s *SubmitStatus) UnmarshalJSON(b []byte) error {
 	case string(SubmitStatusCompleted):
 		*s = SubmitStatusCompleted
 	default:
-		return xerrors.Errorf("invalid status format: %s", s)
+		return xerrors.Errorf("invalid status format: %q", s)
 	}
 
 	return nil
@@ -129,7 +129,7 @@ func (s *SubmitStatusFile) CreateStatusFile(filesystem *fs.FileSystem, dataRootP
 	//	if IsStatusFile(existingDirEntry.Name) {
 	//		err = filesystem.RemoveFile(existingDirEntry.Path, true)
 	//		if err != nil {
-	//			return xerrors.Errorf("failed to delete stale submit status file %s: %w", existingDirEntry.Path, err)
+	//			return xerrors.Errorf("failed to delete stale submit status file %q: %w", existingDirEntry.Path, err)
 	//		}
 	//	}
 	//}
@@ -144,7 +144,7 @@ func (s *SubmitStatusFile) CreateStatusFile(filesystem *fs.FileSystem, dataRootP
 	// we do not truncate status file as it should be empty
 	_, err = filesystem.UploadFileFromBuffer(&jsonBytesBuffer, statusFilePath, "", false, true, true, nil)
 	if err != nil {
-		return xerrors.Errorf("failed to create submit status file %s: %w", statusFilePath, err)
+		return xerrors.Errorf("failed to create submit status file %q: %w", statusFilePath, err)
 	}
 
 	return nil

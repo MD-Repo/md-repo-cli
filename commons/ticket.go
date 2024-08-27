@@ -42,11 +42,11 @@ func GetMDRepoTicketFromString(ticketString string) (MDRepoTicket, error) {
 	irodsDataPath := ticketParts[1]
 
 	if !isAsciiString(irodsTicket) {
-		return MDRepoTicket{}, xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %s is invalid: %w", irodsTicket, NewInvalidTicketError(ticketString))
+		return MDRepoTicket{}, xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %q is invalid: %w", irodsTicket, NewInvalidTicketError(ticketString))
 	}
 
 	if !isPathString(irodsDataPath) {
-		return MDRepoTicket{}, xerrors.Errorf("failed to parse iRODS data path. iRODS target path %s is invalid: %w", irodsDataPath, NewInvalidTicketError(ticketString))
+		return MDRepoTicket{}, xerrors.Errorf("failed to parse iRODS data path. iRODS target path %q is invalid: %w", irodsDataPath, NewInvalidTicketError(ticketString))
 	}
 
 	return MDRepoTicket{

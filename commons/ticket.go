@@ -55,6 +55,15 @@ func GetMDRepoTicketFromString(ticketString string) (MDRepoTicket, error) {
 	}, nil
 }
 
+func GetMDRepoSimulationRelPath(irodsPath string) (string, error) {
+	start := strings.LastIndex(irodsPath, "/MDR_")
+	if start >= 0 {
+		return irodsPath[start+1:], nil
+	}
+
+	return "", xerrors.Errorf("failed to extract submission ID")
+}
+
 func GetMDRepoTicketsFromString(ticketString string) ([]MDRepoTicket, error) {
 	tickets := strings.Split(ticketString, ";")
 	if len(tickets) < 1 {

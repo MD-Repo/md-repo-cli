@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"os"
+	"path/filepath"
 	"time"
 
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
@@ -187,9 +188,22 @@ func (get *GetCommand) Process() error {
 		get.parallelJobManager.Start()
 
 		// run
-		err = get.getOne(mdRepoTicket, get.targetPath)
+		// we create a subdir for ticket
+		dataRelPath, err := commons.GetMDRepoSimulationRelPath(mdRepoTicket.IRODSDataPath)
 		if err != nil {
-			return xerrors.Errorf("failed to get %q to %q: %w", mdRepoTicket.IRODSDataPath, get.targetPath, err)
+			return xerrors.Errorf("failed to extract data path from %q: %w", mdRepoTicket.IRODSDataPath, err)
+		}
+
+		dataTargetPath := filepath.Join(get.targetPath, dataRelPath)
+		targetParentDir := filepath.Dir(dataTargetPath)
+		err = os.MkdirAll(targetParentDir, 0766)
+		if err != nil {
+			return xerrors.Errorf("failed to make a directory %q: %w", targetParentDir, err)
+		}
+
+		err = get.getOne(mdRepoTicket, dataTargetPath)
+		if err != nil {
+			return xerrors.Errorf("failed to get %q to %q: %w", mdRepoTicket.IRODSDataPath, dataTargetPath, err)
 		}
 
 		// release parallel job manager

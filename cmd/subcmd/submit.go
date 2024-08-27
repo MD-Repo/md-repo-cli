@@ -460,7 +460,7 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 		notes := []string{}
 
 		// determine how to upload
-		if submit.parallelTransferFlagValues.SingleTread || submit.parallelTransferFlagValues.ThreadNumber == 1 {
+		if submit.parallelTransferFlagValues.SingleThread || submit.parallelTransferFlagValues.ThreadNumber == 1 {
 			uploadResult, uploadErr = fs.UploadFile(sourcePath, targetPath, "", false, true, true, callbackSubmit)
 			notes = append(notes, "icat", "single-thread")
 		} else if submit.parallelTransferFlagValues.RedirectToResource {
@@ -668,7 +668,7 @@ func (submit *SubmitCommand) submitDir(sourceStat fs.FileInfo, sourcePath string
 }
 
 func (submit *SubmitCommand) computeThreadsRequired(size int64) int {
-	if submit.parallelTransferFlagValues.SingleTread {
+	if submit.parallelTransferFlagValues.SingleThread {
 		return 1
 	}
 

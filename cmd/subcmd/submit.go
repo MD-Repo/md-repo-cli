@@ -210,6 +210,13 @@ func (submit *SubmitCommand) Process() error {
 		return nil
 	}
 
+	// transfer report
+	submit.transferReportManager, err = commons.NewTransferReportManager(submit.transferReportFlagValues.Report, submit.transferReportFlagValues.ReportPath, submit.transferReportFlagValues.ReportToStdout)
+	if err != nil {
+		return xerrors.Errorf("failed to create transfer report manager: %w", err)
+	}
+	defer submit.transferReportManager.Release()
+
 	// get ticket
 	mdRepoTickets, err := commons.GetMDRepoTicketsFromString(config.TicketString)
 	if err != nil {

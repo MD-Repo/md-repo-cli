@@ -49,4 +49,4 @@ jobs:
       run: |
         python .github/workflows/update_release_table.py
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}

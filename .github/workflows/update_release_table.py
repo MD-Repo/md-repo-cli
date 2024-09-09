@@ -100,3 +100,4 @@ if __name__ == "__main__":
     if "### Release Assets\n" not in current_body:
         updated_body = current_body + "\n\n" + markdown_table
         update_release_body(release_id, updated_body)
+        print("updated release body")

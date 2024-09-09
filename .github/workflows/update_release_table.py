@@ -44,7 +44,10 @@ def extract_os_arch_from_filename(filename):
         elif arch == "386":
             arch = "Intel/AMD 32-bit"
         elif arch == "arm64":
-            arch = "ARM 64-bit"
+            if os == "MacOS":
+                arch = "M1/M2/M3 (ARM 64-bit)"
+            else:
+                arch = "ARM 64-bit"
         elif arch == "arm":
             arch = "ARM 32-bit"
 

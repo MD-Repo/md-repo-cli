@@ -1,4 +1,5 @@
 import requests
+import argparse
 import os
 import re
 
@@ -6,7 +7,7 @@ import re
 REPO = "MD-Repo/md-repo-cli"
 API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 
-def get_latest_release_data():
+def get_releases_data():
     headers = {
         'Authorization': f'token {os.getenv("GITHUB_TOKEN")}',
         'Accept': 'application/vnd.github.v3+json',
@@ -14,6 +15,12 @@ def get_latest_release_data():
     response = requests.get(API_URL, headers=headers)
     response.raise_for_status()
     return response.json()
+
+def find_release_by_version(releases, version):
+    for release in releases:
+        if release["tag_name"] == version:
+            return release
+    return None
 
 def extract_os_arch_from_filename(filename):
     # Assuming filenames follow the pattern: <name>-<version>-<os>-<arch>.<ext>
@@ -89,15 +96,27 @@ def update_readme(table):
             file.write(line)
 """
 
+def main(target_version):
+    releases = get_releases_data()
+    release_to_update = find_release_by_version(releases, target_version)
+    
+    if release_to_update:
+        release_id = release_to_update["id"]
+        current_body = release_to_update.get("body", "")
+
+        markdown_table = generate_markdown_table(releases)
+        print(markdown_table)
+
+        if "### Release Assets\n" not in current_body:
+            updated_body = current_body + "\n\n" + markdown_table
+            update_release_body(release_id, updated_body)
+            print(f"Release {target_version} updated successfully.")
+    else:
+        print(f"Release with version {target_version} not found.")
+
 if __name__ == "__main__":
-    latest_release = get_latest_release_data()
-    release_id = latest_release["id"]
-    current_body = latest_release.get("body", "")
-
-    markdown_table = generate_markdown_table(latest_release)
-    print(markdown_table)
-
-    if "### Release Assets\n" not in current_body:
-        updated_body = current_body + "\n\n" + markdown_table
-        update_release_body(release_id, updated_body)
-        print("updated release body")
+    parser = argparse.ArgumentParser(description="Update a specific release in GitHub.")
+    parser.add_argument("version", help="The tag name of the release to update")
+    args = parser.parse_args()
+    
+    main(args.version)

@@ -36,7 +36,13 @@ jobs:
         project_path: "./cmd/"
         binary_name: "mdrepo"
         ldflags: "-X ${{ env.PKG }}/commons.clientVersion=${{ github.ref_name }} -X ${{ env.PKG }}/commons.gitCommit=${{ github.sha }} -X ${{ env.PKG }}/commons.buildDate=${{ env.BUILD_DATE }}"
-    
+
+  update-releases:
+    name: Update Release Go Binary
+    runs-on: ubuntu-20.04
+    needs: releases-matrix
+    steps:
+    - uses: actions/checkout@v3
     - name: Set up Python
       uses: actions/setup-python@v4
       with:

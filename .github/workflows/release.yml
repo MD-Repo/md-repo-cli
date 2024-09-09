@@ -47,6 +47,6 @@ jobs:
   
     - name: Run Python script
       run: |
-        python update_release_table.py
+        python .github/workflows/update_release_table.py
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

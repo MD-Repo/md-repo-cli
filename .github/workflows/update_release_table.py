@@ -104,7 +104,7 @@ def main(target_version):
         release_id = release_to_update["id"]
         current_body = release_to_update.get("body", "")
 
-        markdown_table = generate_markdown_table(releases)
+        markdown_table = generate_markdown_table(release_to_update)
         print(markdown_table)
 
         if "### Release Assets\n" not in current_body:

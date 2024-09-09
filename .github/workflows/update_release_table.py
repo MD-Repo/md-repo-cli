@@ -5,7 +5,7 @@ import re
 
 # GitHub repository details
 REPO = "MD-Repo/md-repo-cli"
-API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
+API_URL = f"https://api.github.com/repos/{REPO}/releases"
 
 def get_releases_data():
     headers = {

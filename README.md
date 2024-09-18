@@ -41,3 +41,28 @@ For Windows on Intel CPU (windows-amd64, windows PowerShell):
 curl -o mdrepov.txt https://raw.githubusercontent.com/MD-Repo/md-repo-cli/main/VERSION.txt ; $env:CLI_VER = (Get-Content mdrepov.txt)
 curl -o mdrepo.zip https://github.com/MD-Repo/md-repo-cli/releases/download/$env:CLI_VER/mdrepo-$env:CLI_VER-windows-amd64.zip ; tar zxvf mdrepo.zip ; del mdrepo.zip ; del mdrepov.txt
 ```
+
+## Command line usage
+
+### Uploading files
+Use the command:
+
+```bash
+mdrepo submit upload_directory
+```
+
+where `upload_directory` is the local parent directory of your simulation files. Enter your upload token when prompted.
+
+If your upload is interrupted you may use the same command and token and the upload will resume.
+
+
+### Downloading files
+Use the command:
+
+```bash
+mdrepo get download_directory
+```
+
+where `download_directory` is the local directory where you wish to download the files. Enter your download token when prompted.
+
+If your download is interrupted you may use the same command and token and the download will resume.

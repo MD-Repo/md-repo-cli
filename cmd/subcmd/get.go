@@ -23,7 +23,7 @@ var getCmd = &cobra.Command{
 	Use:     "get [local dir]",
 	Short:   "Download MD-Repo data to local dir",
 	Aliases: []string{"download", "down"},
-	Long:    `This downloads MD-Repo data to the given local dir.`,
+	Long:    `This downloads MD-Repo data to the given local directory.`,
 	RunE:    processGetCommand,
 	Args:    cobra.ExactArgs(1),
 }
@@ -87,7 +87,7 @@ func NewGetCommand(command *cobra.Command, args []string) (*GetCommand, error) {
 		updatedPathMap: map[string]bool{},
 	}
 
-	get.maxConnectionNum = get.parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
+	get.maxConnectionNum = get.parallelTransferFlagValues.ThreadNumber
 
 	// path
 	get.targetPath = "./"
@@ -177,7 +177,7 @@ func (get *GetCommand) Process() error {
 			return xerrors.Errorf("failed to get iRODS Account: %w", err)
 		}
 
-		get.filesystem, err = commons.GetIRODSFSClientAdvanced(get.account, get.maxConnectionNum, get.parallelTransferFlagValues.TCPBufferSize)
+		get.filesystem, err = commons.GetIRODSFSClientForLargeFileIO(get.account, get.maxConnectionNum, get.parallelTransferFlagValues.TCPBufferSize)
 		if err != nil {
 			return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
 		}
@@ -264,7 +264,6 @@ func (get *GetCommand) getOne(mdRepoTicket commons.MDRepoTicket, targetPath stri
 	// file
 	targetPath = commons.MakeTargetLocalFilePath(sourcePath, targetPath)
 	return get.getFile(sourceEntry, "", targetPath)
-
 }
 
 func (get *GetCommand) scheduleGet(sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string) error {
@@ -385,17 +384,18 @@ func (get *GetCommand) getFile(sourceEntry *irodsclient_fs.Entry, tempPath strin
 					// skip
 					now := time.Now()
 					reportFile := &commons.TransferReportFile{
-						Method:            commons.TransferMethodGet,
-						StartAt:           now,
-						EndAt:             now,
-						SourcePath:        sourceEntry.Path,
-						SourceSize:        sourceEntry.Size,
-						SourceChecksum:    hex.EncodeToString(sourceEntry.CheckSum),
-						DestPath:          targetPath,
-						DestSize:          targetStat.Size(),
-						DestChecksum:      hex.EncodeToString(localChecksum),
-						ChecksumAlgorithm: string(sourceEntry.CheckSumAlgorithm),
-						Notes:             []string{"differential", "same checksum", "skip"},
+						Method:                  commons.TransferMethodGet,
+						StartAt:                 now,
+						EndAt:                   now,
+						SourcePath:              sourceEntry.Path,
+						SourceSize:              sourceEntry.Size,
+						SourceChecksumAlgorithm: string(sourceEntry.CheckSumAlgorithm),
+						SourceChecksum:          hex.EncodeToString(sourceEntry.CheckSum),
+						DestPath:                targetPath,
+						DestSize:                targetStat.Size(),
+						DestChecksum:            hex.EncodeToString(localChecksum),
+						DestChecksumAlgorithm:   string(sourceEntry.CheckSumAlgorithm),
+						Notes:                   []string{"differential", "same checksum", "skip"},
 					}
 
 					get.transferReportManager.AddFile(reportFile)

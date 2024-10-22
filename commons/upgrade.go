@@ -24,7 +24,7 @@ func CheckNewRelease() (*selfupdate.Release, error) {
 	}
 
 	if !found {
-		return nil, xerrors.Errorf("latest version for %s/%s could not be found from github repository '%s'", runtime.GOOS, runtime.GOARCH, mdRepoPackagePath)
+		return nil, xerrors.Errorf("latest version for %s/%s is not found from github repository %q", runtime.GOOS, runtime.GOARCH, mdRepoPackagePath)
 	}
 
 	return latest, nil
@@ -44,7 +44,7 @@ func SelfUpgrade() error {
 	}
 
 	if !found {
-		return xerrors.Errorf("latest version for %s/%s could not be found from github repository '%s'", runtime.GOOS, runtime.GOARCH, mdRepoPackagePath)
+		return xerrors.Errorf("latest version for %s/%s could not be found from github repository %q", runtime.GOOS, runtime.GOARCH, mdRepoPackagePath)
 	}
 
 	myVersion := GetClientVersion()

@@ -68,6 +68,7 @@ func GetProgressWriter(displayPath bool) progress.Writer {
 
 func GetShortPathMessage(name string, messageLen int) string {
 	msg := name
+	// md-repo-cli specific implementation
 	if messageLen < len(name) {
 		msg = fmt.Sprintf(".../%s", GetBasename(name))
 	}

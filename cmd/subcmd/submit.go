@@ -238,7 +238,7 @@ func (submit *SubmitCommand) Process() error {
 			return xerrors.Errorf("failed to get iRODS Account: %w", err)
 		}
 
-		submit.filesystem, err = commons.GetIRODSFSClientAdvanced(submit.account, submit.maxConnectionNum, submit.parallelTransferFlagValues.TCPBufferSize)
+		submit.filesystem, err = commons.GetIRODSFSClientForLargeFileIO(submit.account, submit.maxConnectionNum, submit.parallelTransferFlagValues.TCPBufferSize)
 		if err != nil {
 			return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
 		}
@@ -575,17 +575,18 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 					// skip
 					now := time.Now()
 					reportFile := &commons.TransferReportFile{
-						Method:            commons.TransferMethodPut,
-						StartAt:           now,
-						EndAt:             now,
-						SourcePath:        sourcePath,
-						SourceSize:        sourceStat.Size(),
-						SourceChecksum:    hex.EncodeToString(localChecksum),
-						DestPath:          targetEntry.Path,
-						DestSize:          targetEntry.Size,
-						DestChecksum:      hex.EncodeToString(targetEntry.CheckSum),
-						ChecksumAlgorithm: string(targetEntry.CheckSumAlgorithm),
-						Notes:             []string{"differential", "same checksum", "skip"},
+						Method:                  commons.TransferMethodPut,
+						StartAt:                 now,
+						EndAt:                   now,
+						SourcePath:              sourcePath,
+						SourceSize:              sourceStat.Size(),
+						SourceChecksumAlgorithm: string(targetEntry.CheckSumAlgorithm),
+						SourceChecksum:          hex.EncodeToString(localChecksum),
+						DestPath:                targetEntry.Path,
+						DestSize:                targetEntry.Size,
+						DestChecksum:            hex.EncodeToString(targetEntry.CheckSum),
+						DestChecksumAlgorithm:   string(targetEntry.CheckSumAlgorithm),
+						Notes:                   []string{"differential", "same checksum", "skip"},
 					}
 
 					submit.transferReportManager.AddFile(reportFile)

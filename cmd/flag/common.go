@@ -34,7 +34,7 @@ func SetCommonFlags(command *cobra.Command) {
 
 }
 
-func GetCommonFlagValues() *CommonFlagValues {
+func GetCommonFlagValues(command *cobra.Command) *CommonFlagValues {
 	if len(commonFlagValues.logLevelInput) > 0 {
 		lvl, err := log.ParseLevel(commonFlagValues.logLevelInput)
 		if err != nil {
@@ -47,8 +47,33 @@ func GetCommonFlagValues() *CommonFlagValues {
 	return &commonFlagValues
 }
 
+func getLogrusLogLevel(irodsLogLevel int) log.Level {
+	switch irodsLogLevel {
+	case 0:
+		return log.PanicLevel
+	case 1:
+		return log.FatalLevel
+	case 2, 3:
+		return log.ErrorLevel
+	case 4, 5, 6:
+		return log.WarnLevel
+	case 7:
+		return log.InfoLevel
+	case 8:
+		return log.DebugLevel
+	case 9, 10:
+		return log.TraceLevel
+	}
+
+	if irodsLogLevel < 0 {
+		return log.PanicLevel
+	}
+
+	return log.TraceLevel
+}
+
 func setLogLevel(command *cobra.Command) {
-	myCommonFlagValues := GetCommonFlagValues()
+	myCommonFlagValues := GetCommonFlagValues(command)
 
 	if myCommonFlagValues.Quiet {
 		log.SetLevel(log.FatalLevel)
@@ -62,7 +87,7 @@ func setLogLevel(command *cobra.Command) {
 }
 
 func ProcessCommonFlags(command *cobra.Command) (bool, error) {
-	myCommonFlagValues := GetCommonFlagValues()
+	myCommonFlagValues := GetCommonFlagValues(command)
 	retryFlagValues := GetRetryFlagValues()
 
 	setLogLevel(command)

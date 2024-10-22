@@ -1,18 +1,21 @@
 package commons
 
-import "time"
+import (
+	"time"
+
+	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
+)
 
 const (
 	mdRepoPackagePath string = "MD-Repo/md-repo-cli"
 
-	clientProgramName string        = "md-repo-cli"
-	connectionTimeout time.Duration = 10 * time.Minute
-	filesystemTimeout time.Duration = 10 * time.Minute
+	ClientProgramName string                     = "md-repo-cli"
+	FilesystemTimeout irodsclient_types.Duration = irodsclient_types.Duration(10 * time.Minute)
 
 	TransferThreadNumDefault   int    = 5
 	UploadThreadNumMax         int    = 20
-	TcpBufferSizeDefault       int    = 4 * 1024 * 1024
-	TcpBufferSizeStringDefault string = "4MB"
+	TCPBufferSizeDefault       int    = 1 * 1024 * 1024
+	TCPBufferSizeStringDefault string = "1MB"
 
 	RedirectToResourceMinSize int64 = 1024 * 1024 * 1024 // 1GB
 	ParallelUploadMinSize     int64 = 80 * 1024 * 1024   // 80MB

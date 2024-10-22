@@ -3,7 +3,7 @@ package commons
 import (
 	"golang.org/x/xerrors"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -40,6 +40,7 @@ func NewConfigTypeInFromYAML(yamlBytes []byte) (*ConfigTypeIn, error) {
 	return config, nil
 }
 
+// ToYAML converts to YAML bytes
 func (config *ConfigTypeIn) ToYAML() ([]byte, error) {
 	yamlBytes, err := yaml.Marshal(config)
 	if err != nil {

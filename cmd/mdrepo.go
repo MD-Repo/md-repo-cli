@@ -82,7 +82,7 @@ func main() {
 	if err != nil {
 		logger.Errorf("%+v", err)
 
-		if flag.GetCommonFlagValues().DebugMode {
+		if flag.GetCommonFlagValues(rootCmd).DebugMode {
 			commons.PrintErrorf("%+v\n", err)
 		}
 
@@ -91,12 +91,12 @@ func main() {
 		} else if irodsclient_types.IsConnectionConfigError(err) {
 			var connectionConfigError *irodsclient_types.ConnectionConfigError
 			if errors.As(err, &connectionConfigError) {
-				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server (host: %q, port: %d)!\n", connectionConfigError.Config.Host, connectionConfigError.Config.Port)
+				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server (host: %q, port: %d)!\nMD-Repo data server might be temporarily unavailable.\nPlease try again in a few minutes.\n", connectionConfigError.Config.Host, connectionConfigError.Config.Port)
 			} else {
-				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\n")
+				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\nMD-Repo data server might be temporarily unavailable.\nPlease try again in a few minutes.\n")
 			}
 		} else if irodsclient_types.IsConnectionError(err) {
-			commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\n")
+			commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\nMD-Repo data server might be temporarily unavailable.\nPlease try again in a few minutes.\n")
 		} else if irodsclient_types.IsConnectionPoolFullError(err) {
 			var connectionPoolFullError *irodsclient_types.ConnectionPoolFullError
 			if errors.As(err, &connectionPoolFullError) {
@@ -167,7 +167,7 @@ func main() {
 			if errors.As(err, &serviceError) {
 				commons.PrintErrorf("%s\n", serviceError.Message)
 			} else {
-				commons.PrintErrorf("MD-Repo service error!\n")
+				commons.PrintErrorf("MD-Repo service error!\nMD-Repo server might be temporarily unavailable.\nPlease try again in a few minutes.\n")
 			}
 		} else if merr, ok := err.(*multierror.Error); ok {
 			for _, merrElem := range merr.Errors {

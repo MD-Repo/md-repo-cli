@@ -35,7 +35,7 @@ func GetAccount(ticket *MDRepoTicket) (*irodsclient_types.IRODSAccount, error) {
 	return &irodsclient_types.IRODSAccount{
 		AuthenticationScheme:    irodsclient_types.AuthSchemeNative,
 		ClientServerNegotiation: false,
-		CSNegotiationPolicy:     irodsclient_types.CSNegotiationRequireTCP,
+		CSNegotiationPolicy:     irodsclient_types.CSNegotiationPolicyRequestTCP,
 		Host:                    mdRepoHost,
 		Port:                    mdRepoPort,
 		ClientUser:              mdRepoUser,
@@ -45,6 +45,7 @@ func GetAccount(ticket *MDRepoTicket) (*irodsclient_types.IRODSAccount, error) {
 		Password:                mdRepoUserPassword,
 		Ticket:                  ticketString,
 		DefaultResource:         "",
+		DefaultHashScheme:       irodsclient_types.HashSchemeDefault,
 		PamTTL:                  1,
 		SSLConfiguration:        nil,
 	}, nil

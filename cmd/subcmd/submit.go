@@ -593,6 +593,24 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 
 					commons.Printf("skip uploading a file %q to %q. The file with the same hash already exists!\n", sourcePath, targetPath)
 					logger.Debugf("skip uploading a file %q to %q. The file with the same hash already exists!", sourcePath, targetPath)
+
+					// add skipped status entry
+					hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5")
+					if err != nil {
+						return xerrors.Errorf("failed to get hash for %q: %w", sourcePath, err)
+					}
+
+					targetRelPath := targetPath
+					if strings.HasPrefix(targetPath, fmt.Sprintf("%s/", targetRootPath)) {
+						targetRelPath = targetPath[len(targetRootPath)+1:]
+					}
+
+					submitStatusEntry := commons.SubmitStatusEntry{
+						IRODSPath: targetRelPath,
+						Size:      targetEntry.Size,
+						MD5Hash:   hex.EncodeToString(hash),
+					}
+					submit.submitStatusFile.AddFile(submitStatusEntry)
 					return nil
 				}
 			}

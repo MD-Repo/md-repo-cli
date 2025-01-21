@@ -468,22 +468,22 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 
 		// determine how to upload
 		if submit.parallelTransferFlagValues.SingleThread || submit.parallelTransferFlagValues.ThreadNumber == 1 {
-			uploadResult, uploadErr = fs.UploadFile(sourcePath, targetPath, "", false, true, true, callbackSubmit)
+			uploadResult, uploadErr = fs.UploadFile(sourcePath, targetPath, "", false, true, true, false, callbackSubmit)
 			notes = append(notes, "icat", "single-thread")
 		} else if submit.parallelTransferFlagValues.RedirectToResource {
-			uploadResult, uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetPath, "", 0, false, true, true, callbackSubmit)
+			uploadResult, uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetPath, "", 0, false, true, true, false, callbackSubmit)
 			notes = append(notes, "redirect-to-resource")
 		} else if submit.parallelTransferFlagValues.Icat {
-			uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", 0, false, true, true, callbackSubmit)
+			uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", 0, false, true, true, false, callbackSubmit)
 			notes = append(notes, "icat", "multi-thread")
 		} else {
 			// auto
 			if sourceStat.Size() >= commons.RedirectToResourceMinSize {
 				// redirect-to-resource
-				uploadResult, uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetPath, "", 0, false, true, true, callbackSubmit)
+				uploadResult, uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetPath, "", 0, false, true, true, false, callbackSubmit)
 				notes = append(notes, "redirect-to-resource")
 			} else {
-				uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", 0, false, true, true, callbackSubmit)
+				uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", 0, false, true, true, false, callbackSubmit)
 				notes = append(notes, "icat", "multi-thread")
 			}
 		}

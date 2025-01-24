@@ -22,7 +22,7 @@ const (
 
 	// iRODS configuration
 	// Prod
-	mdRepoHost         string = "data.cyverse.org"
+	mdRepoHost         string = "dataxxx.cyverse.org"
 	mdRepoPort         int    = 1247
 	mdRepoZone         string = "iplant"
 	mdRepoUser         string = "md-uploader"

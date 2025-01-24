@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"net/http"
 	"os"
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
@@ -91,12 +92,12 @@ func main() {
 		} else if irodsclient_types.IsConnectionConfigError(err) {
 			var connectionConfigError *irodsclient_types.ConnectionConfigError
 			if errors.As(err, &connectionConfigError) {
-				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server (host: %q, port: %d)!\nMD-Repo data server might be temporarily unavailable.\nPlease try again in a few minutes.\n", connectionConfigError.Config.Host, connectionConfigError.Config.Port)
+				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server (host: %q, port: %d)!\nWrong MD-Repo data server configuration.\n", connectionConfigError.Config.Host, connectionConfigError.Config.Port)
 			} else {
-				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\nMD-Repo data server might be temporarily unavailable.\nPlease try again in a few minutes.\n")
+				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\nWrong MD-Repo data server configuration.\n")
 			}
 		} else if irodsclient_types.IsConnectionError(err) {
-			commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\nMD-Repo data server might be temporarily unavailable.\nPlease try again in a few minutes.\n")
+			printNetworkError()
 		} else if irodsclient_types.IsConnectionPoolFullError(err) {
 			var connectionPoolFullError *irodsclient_types.ConnectionPoolFullError
 			if errors.As(err, &connectionPoolFullError) {
@@ -153,6 +154,8 @@ func main() {
 			} else {
 				commons.PrintErrorf("MD-Repo data server error!\n")
 			}
+		} else if commons.IsDialHTTPError(err) {
+			printNetworkError()
 		} else if commons.IsInvalidTicketError(err) {
 			var invalidTicketError *commons.InvalidTicketError
 			if errors.As(err, &invalidTicketError) {
@@ -216,4 +219,26 @@ func main() {
 
 		os.Exit(1)
 	}
+}
+
+func printNetworkError() {
+	commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\n")
+
+	// check if internet works
+	_, err := http.Get("https://www.google.com")
+	if err != nil {
+		commons.PrintErrorf("No Internet access.\nCheck internet connectivity.\n")
+		return
+	}
+	commons.Printf("Tested Internet access via www.google.com - OK.\n")
+
+	// check if datastore is under maintenance
+	_, err = http.Get("https://data.cyverse.org/dav/iplant/commons/community_released")
+	if err != nil {
+		commons.PrintErrorf("MD-Repo data server might be temporarily unavailable.\nCheck if CyVerse Data Store is under maintenance.\nhttps://cyverse.org/maintenance\n")
+		return
+	}
+	commons.Printf("Tested MD-Repo data server access via https://data.cyverse.org - OK.\n")
+
+	commons.PrintErrorf("Verify that your firewall allows access on port 1247 (perhaps request this from network admin)\n")
 }

@@ -172,3 +172,34 @@ func (err *NotFileError) ToString() string {
 func IsNotFileError(err error) bool {
 	return errors.Is(err, &NotFileError{})
 }
+
+type DialHTTPError struct {
+	URL string
+}
+
+func NewDialHTTPError(url string) error {
+	return &DialHTTPError{
+		URL: url,
+	}
+}
+
+// Error returns error message
+func (err *DialHTTPError) Error() string {
+	return fmt.Sprintf("failed to dial to %q", err.URL)
+}
+
+// Is tests type of error
+func (err *DialHTTPError) Is(other error) bool {
+	_, ok := other.(*DialHTTPError)
+	return ok
+}
+
+// ToString stringifies the object
+func (err *DialHTTPError) ToString() string {
+	return fmt.Sprintf("DialHTTPError: %q", err.URL)
+}
+
+// IsDialHTTPError evaluates if the given error is DialHTTPError
+func IsDialHTTPError(err error) bool {
+	return errors.Is(err, &DialHTTPError{})
+}

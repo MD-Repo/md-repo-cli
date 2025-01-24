@@ -145,6 +145,11 @@ func GetMDRepoTicketStringFromToken(serviceURL string, token string) (string, er
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if strings.Contains(err.Error(), "dial tcp") {
+			dialError := xerrors.Errorf("%s: %w", err.Error(), NewDialHTTPError(apiURL))
+			return "", xerrors.Errorf("failed to perform http post to retrieve tickets: %w", dialError)
+		}
+
 		return "", xerrors.Errorf("failed to perform http post to retrieve tickets: %w", err)
 	}
 

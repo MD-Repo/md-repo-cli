@@ -8,7 +8,6 @@ import (
 	"time"
 
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
-	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	irodsclient_util "github.com/cyverse/go-irodsclient/irods/util"
 	"github.com/jedib0t/go-pretty/v6/progress"
 
@@ -63,7 +62,6 @@ type GetCommand struct {
 
 	maxConnectionNum int
 
-	account    *irodsclient_types.IRODSAccount
 	filesystem *irodsclient_fs.FileSystem
 
 	targetPath string
@@ -170,50 +168,58 @@ func (get *GetCommand) Process() error {
 
 	// we may further optimize this by run it parallel
 	for _, mdRepoTicket := range mdRepoTickets {
-		// we create filesystem, job manager for every ticket as they require separate auth
-		// Create a file system
-		get.account, err = commons.GetAccount(&mdRepoTicket)
+		err = get.processTicket(mdRepoTicket)
 		if err != nil {
-			return xerrors.Errorf("failed to get iRODS Account: %w", err)
-		}
-
-		get.filesystem, err = commons.GetIRODSFSClientForLargeFileIO(get.account, get.maxConnectionNum, get.parallelTransferFlagValues.TCPBufferSize)
-		if err != nil {
-			return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
-		}
-		defer get.filesystem.Release()
-
-		// parallel job manager
-		get.parallelJobManager = commons.NewParallelJobManager(get.filesystem, get.parallelTransferFlagValues.ThreadNumber, !get.progressFlagValues.NoProgress, false)
-		get.parallelJobManager.Start()
-
-		// run
-		// we create a subdir for ticket
-		dataRelPath, err := commons.GetMDRepoSimulationRelPath(mdRepoTicket.IRODSDataPath)
-		if err != nil {
-			return xerrors.Errorf("failed to extract data path from %q: %w", mdRepoTicket.IRODSDataPath, err)
-		}
-
-		dataTargetPath := filepath.Join(get.targetPath, dataRelPath)
-		targetParentDir := filepath.Dir(dataTargetPath)
-		err = os.MkdirAll(targetParentDir, 0766)
-		if err != nil {
-			return xerrors.Errorf("failed to make a directory %q: %w", targetParentDir, err)
-		}
-
-		err = get.getOne(mdRepoTicket, dataTargetPath)
-		if err != nil {
-			return xerrors.Errorf("failed to get %q to %q: %w", mdRepoTicket.IRODSDataPath, dataTargetPath, err)
-		}
-
-		// release parallel job manager
-		get.parallelJobManager.DoneScheduling()
-		err = get.parallelJobManager.Wait()
-		if err != nil {
-			get.filesystem.Release()
-			return xerrors.Errorf("failed to perform parallel jobs: %w", err)
+			return err
 		}
 	}
+	return nil
+}
+
+func (get *GetCommand) processTicket(mdRepoTicket commons.MDRepoTicket) error {
+	// we create filesystem, job manager for every ticket as they require separate auth
+	// Create a file system
+	account, err := commons.GetAccount(&mdRepoTicket)
+	if err != nil {
+		return xerrors.Errorf("failed to get iRODS Account: %w", err)
+	}
+
+	get.filesystem, err = commons.GetIRODSFSClientForLargeFileIO(account, get.maxConnectionNum, get.parallelTransferFlagValues.TCPBufferSize)
+	if err != nil {
+		return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
+	}
+	defer get.filesystem.Release()
+
+	// parallel job manager
+	get.parallelJobManager = commons.NewParallelJobManager(get.filesystem, get.parallelTransferFlagValues.ThreadNumber, !get.progressFlagValues.NoProgress, false)
+	get.parallelJobManager.Start()
+
+	// run
+	// we create a subdir for ticket
+	dataRelPath, err := commons.GetMDRepoSimulationRelPath(mdRepoTicket.IRODSDataPath)
+	if err != nil {
+		return xerrors.Errorf("failed to extract data path from %q: %w", mdRepoTicket.IRODSDataPath, err)
+	}
+
+	dataTargetPath := filepath.Join(get.targetPath, dataRelPath)
+	targetParentDir := filepath.Dir(dataTargetPath)
+	err = os.MkdirAll(targetParentDir, 0766)
+	if err != nil {
+		return xerrors.Errorf("failed to make a directory %q: %w", targetParentDir, err)
+	}
+
+	err = get.getOne(mdRepoTicket, dataTargetPath)
+	if err != nil {
+		return xerrors.Errorf("failed to get %q to %q: %w", mdRepoTicket.IRODSDataPath, dataTargetPath, err)
+	}
+
+	// release parallel job manager
+	get.parallelJobManager.DoneScheduling()
+	err = get.parallelJobManager.Wait()
+	if err != nil {
+		return xerrors.Errorf("failed to perform parallel jobs: %w", err)
+	}
+
 	return nil
 }
 

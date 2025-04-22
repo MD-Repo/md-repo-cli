@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
+	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/xerrors"
 )
 
@@ -78,6 +80,30 @@ func GetFileExtension(p string) string {
 	return p
 }
 
+func GetIRODSPathDirname(path string) string {
+	p := strings.TrimRight(path, "/")
+	idx := strings.LastIndex(p, "/")
+
+	if idx < 0 {
+		return p
+	} else if idx == 0 {
+		return "/"
+	} else {
+		return p[:idx]
+	}
+}
+
+func GetIRODSPathBasename(path string) string {
+	p := strings.TrimRight(path, "/")
+	idx := strings.LastIndex(p, "/")
+
+	if idx < 0 {
+		return p
+	} else {
+		return p[idx+1:]
+	}
+}
+
 func GetBasename(p string) string {
 	p = strings.TrimRight(p, string(os.PathSeparator))
 	p = strings.TrimRight(p, "/")
@@ -95,7 +121,7 @@ func GetBasename(p string) string {
 	return p[idx2+1:]
 }
 
-// GetParentDirs returns all parent dirs
+// GetParentIRODSDirs returns all parent dirs
 func GetParentIRODSDirs(p string) []string {
 	parents := []string{}
 
@@ -121,6 +147,82 @@ func GetParentIRODSDirs(p string) []string {
 	return parents
 }
 
+// GetParentLocalDirs returns all parent dirs
+func GetParentLocalDirs(p string) []string {
+	logger := log.WithFields(log.Fields{
+		"package":  "commons",
+		"function": "GetParentLocalDirs",
+	})
+
+	parents := []string{}
+
+	if p == string(os.PathSeparator) {
+		return parents
+	}
+
+	absPath, _ := filepath.Abs(p)
+	if filepath.Dir(absPath) == absPath {
+		return parents
+	}
+
+	curPath := absPath
+	logger.Infof("curPath = %s", curPath)
+	for len(curPath) > 0 {
+		curDir := filepath.Dir(curPath)
+		if curDir == curPath {
+			// root
+			break
+		}
+
+		if len(curDir) > 0 {
+			parents = append(parents, curDir)
+		}
+
+		curPath = curDir
+	}
+
+	// sort
+	sort.Slice(parents, func(i int, j int) bool {
+		return len(parents[i]) < len(parents[j])
+	})
+
+	return parents
+}
+
+func FirstDelimeterIndex(p string) int {
+	idx1 := strings.Index(p, string(os.PathSeparator))
+	idx2 := strings.Index(p, "/")
+
+	if idx1 < 0 && idx2 < 0 {
+		return idx1
+	}
+
+	if idx1 < 0 {
+		return idx2
+	}
+
+	if idx2 < 0 {
+		return idx1
+	}
+
+	if idx1 <= idx2 {
+		return idx1
+	}
+
+	return idx2
+}
+
+func LastDelimeterIndex(p string) int {
+	idx1 := strings.LastIndex(p, string(os.PathSeparator))
+	idx2 := strings.LastIndex(p, "/")
+
+	if idx1 >= idx2 {
+		return idx1
+	}
+
+	return idx2
+}
+
 func GetDir(p string) string {
 	idx1 := strings.LastIndex(p, string(os.PathSeparator))
 	idx2 := strings.LastIndex(p, "/")
@@ -135,30 +237,74 @@ func GetDir(p string) string {
 	return p[:idx2]
 }
 
-// GetParentLocalDirs returns all parent dirs
-func GetParentLocalDirs(p string) []string {
-	parents := []string{}
-
-	if p == string(os.PathSeparator) || p == "." {
-		return parents
+func commonPrefix(sep byte, paths ...string) string {
+	// Handle special cases.
+	switch len(paths) {
+	case 0:
+		return ""
+	case 1:
+		return path.Clean(paths[0])
 	}
 
-	curPath := p
-	for len(curPath) > 0 && curPath != string(os.PathSeparator) && curPath != "." {
-		curDir := filepath.Dir(curPath)
-		if len(curDir) > 0 && curDir != "." {
-			parents = append(parents, curDir)
+	c := []byte(path.Clean(paths[0]))
+	c = append(c, sep)
+
+	// Ignore the first path since it's already in c
+	for _, v := range paths[1:] {
+		// Clean up each path before testing it
+		v = path.Clean(v) + string(sep)
+
+		// Find the first non-common byte and truncate c
+		if len(v) < len(c) {
+			c = c[:len(v)]
+		}
+		for i := 0; i < len(c); i++ {
+			if v[i] != c[i] {
+				c = c[:i]
+				break
+			}
+		}
+	}
+
+	// Remove trailing non-separator characters and the final separator
+	for i := len(c) - 1; i >= 0; i-- {
+		if c[i] == sep {
+			c = c[:i]
+			break
+		}
+	}
+
+	return string(c)
+}
+
+func GetCommonRootLocalDirPath(paths []string) (string, error) {
+	absPaths := make([]string, len(paths))
+
+	// get abs paths
+	for idx, path := range paths {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return "", xerrors.Errorf("failed to compute absolute path for %q: %w", path, err)
+		}
+		absPaths[idx] = absPath
+	}
+
+	// find shortest path
+	commonRoot := commonPrefix(filepath.Separator, absPaths...)
+
+	commonRootStat, err := os.Stat(commonRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", irodsclient_types.NewFileNotFoundError(commonRoot)
 		}
 
-		curPath = curDir
+		return "", xerrors.Errorf("failed to stat %q: %w", commonRoot, err)
 	}
 
-	// sort
-	sort.Slice(parents, func(i int, j int) bool {
-		return len(parents[i]) < len(parents[j])
-	})
-
-	return parents
+	if commonRootStat.IsDir() {
+		return commonRoot, nil
+	}
+	return filepath.Dir(commonRoot), nil
 }
 
 func ExpandHomeDir(p string) (string, error) {
@@ -200,8 +346,19 @@ func ExistFile(p string) bool {
 	return false
 }
 
-func MarkPathMap(pathMap map[string]bool, p string) {
+func MarkLocalPathMap(pathMap map[string]bool, p string) {
+	dirs := GetParentLocalDirs(p)
+
+	for _, dir := range dirs {
+		pathMap[dir] = true
+	}
+
+	pathMap[p] = true
+}
+
+func MarkIRODSPathMap(pathMap map[string]bool, p string) {
 	dirs := GetParentIRODSDirs(p)
+
 	for _, dir := range dirs {
 		pathMap[dir] = true
 	}

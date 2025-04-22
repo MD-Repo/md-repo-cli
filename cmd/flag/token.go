@@ -15,10 +15,10 @@ var (
 )
 
 func SetTokenFlags(command *cobra.Command) {
-	command.Flags().StringVarP(&tokenFlagValues.Token, "token", "t", "", "Specify token")
-	command.Flags().StringVar(&tokenFlagValues.ServiceURL, "svc_url", "", "Specify service url (use default if not provided)")
+	command.Flags().StringVarP(&tokenFlagValues.Token, "token", "t", "", "Set the token")
+	command.Flags().StringVar(&tokenFlagValues.ServiceURL, "svc_url", "", "Set the service URL (use default if not provided)")
+	command.Flags().StringVar(&tokenFlagValues.TicketString, "ticket_string", "", "Set the ticket string")
 
-	command.Flags().StringVar(&tokenFlagValues.TicketString, "ticket_string", "", "Specify ticket string")
 	command.Flags().MarkHidden("ticket_string")
 
 	command.MarkFlagsMutuallyExclusive("token", "ticket_string")

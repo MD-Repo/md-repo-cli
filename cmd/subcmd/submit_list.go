@@ -172,17 +172,12 @@ func (submitls *SubmitListCommand) listOne(sourceRootPath string, sourcePath str
 	defer submitls.filesystem.ReturnMetadataConnection(connection)
 
 	// collection
-	collection, err := irodsclient_irodsfs.GetCollection(connection, sourcePath)
-	if err != nil {
-		return xerrors.Errorf("failed to get collection %q: %w", sourcePath, err)
-	}
-
 	colls, err := irodsclient_irodsfs.ListSubCollections(connection, sourcePath)
 	if err != nil {
 		return xerrors.Errorf("failed to list sub-collections in %q: %w", sourcePath, err)
 	}
 
-	objs, err := irodsclient_irodsfs.ListDataObjects(connection, collection)
+	objs, err := irodsclient_irodsfs.ListDataObjects(connection, sourcePath)
 	if err != nil {
 		return xerrors.Errorf("failed to list data-objects in %q: %w", sourcePath, err)
 	}
@@ -319,7 +314,7 @@ func (submitls *SubmitListCommand) printTextGridRow(isDir bool, name string, siz
 		typeStr = "Dir"
 	}
 
-	modTime := commons.MakeDateTimeString(lastmodified)
+	modTime := commons.MakeDateTimeStringHM(lastmodified)
 	submitls.printTextGridRowInternal(typeStr, name, size, checksum, modTime)
 }
 

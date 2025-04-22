@@ -5,14 +5,15 @@ import (
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/commons"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"golang.org/x/xerrors"
 )
 
 var upgradeCmd = &cobra.Command{
 	Use:   "upgrade",
-	Short: "Upgrade MD-Repo command-line tool to the latest version available",
-	Long:  `This upgrades MD-Repo command-line tool to the latest version available.`,
+	Short: "Upgrade MD-Repo command-line tool to the latest available version",
+	Long:  `This command upgrades MD-Repo command-line tool to the latest version available.`,
 	RunE:  processUpgradeCommand,
 	Args:  cobra.NoArgs,
 }
@@ -38,6 +39,7 @@ func processUpgradeCommand(command *cobra.Command, args []string) error {
 type UpgradeCommand struct {
 	command *cobra.Command
 
+	commonFlagValues       *flag.CommonFlagValues
 	checkVersionFlagValues *flag.CheckVersionFlagValues
 }
 
@@ -45,6 +47,7 @@ func NewUpgradeCommand(command *cobra.Command, args []string) (*UpgradeCommand, 
 	upgrade := &UpgradeCommand{
 		command: command,
 
+		commonFlagValues:       flag.GetCommonFlagValues(command),
 		checkVersionFlagValues: flag.GetCheckVersionFlagValues(),
 	}
 
@@ -61,16 +64,7 @@ func (upgrade *UpgradeCommand) Process() error {
 		return nil
 	}
 
-	if upgrade.checkVersionFlagValues.Check {
-		err = upgrade.checkNewVersion()
-		if err != nil {
-			return xerrors.Errorf("failed to check new release: %w", err)
-		}
-
-		return nil
-	}
-
-	err = upgrade.upgrade()
+	err = upgrade.upgrade(upgrade.checkVersionFlagValues.Check)
 	if err != nil {
 		return xerrors.Errorf("failed to upgrade to new release: %w", err)
 	}
@@ -78,20 +72,57 @@ func (upgrade *UpgradeCommand) Process() error {
 	return nil
 }
 
-func (upgrade *UpgradeCommand) checkNewVersion() error {
-	newRelease, err := commons.CheckNewRelease()
-	if err != nil {
-		return err
-	}
-
-	commons.Printf("Latest version v%s for %s/%s\n", newRelease.Version(), runtime.GOOS, runtime.GOARCH)
-	commons.Printf("Latest release URL: %s\n", newRelease.URL)
+func (upgrade *UpgradeCommand) upgrade(checkOnly bool) error {
+	logger := log.WithFields(log.Fields{
+		"package":  "commons",
+		"struct":   "UpgradeCommand",
+		"function": "upgrade",
+	})
 
 	myVersion := commons.GetClientVersion()
+	logger.Infof("Current cilent version installed: %s\n", myVersion)
 	commons.Printf("Current cilent version installed: %s\n", myVersion)
+
+	newRelease, err := commons.CheckNewRelease()
+	if err != nil {
+		return xerrors.Errorf("failed to check new release: %w", err)
+	}
+
+	logger.Infof("Latest release version available for %s/%s: v%s\n", runtime.GOOS, runtime.GOARCH, newRelease.Version())
+	logger.Infof("Latest release URL: %s\n", newRelease.URL)
+	commons.Printf("Latest release version available for %s/%s: v%s\n", runtime.GOOS, runtime.GOARCH, newRelease.Version())
+	commons.Printf("Latest release URL: %s\n", newRelease.URL)
+
+	if upgrade.hasNewRelease(myVersion, newRelease.Version()) {
+		logger.Infof("Need upgrading to latest version v%s\n", newRelease.Version())
+		commons.Printf("Need upgrading to latest version v%s\n", newRelease.Version())
+	} else {
+		logger.Infof("Current client version installed is up-to-date [%s]\n", myVersion)
+		commons.Printf("Current client version installed is up-to-date [%s]\n", myVersion)
+		return nil
+	}
+
+	if checkOnly {
+		return nil
+	}
+
+	commons.Printf("Upgrading to latest version v%s\n", newRelease.Version())
+
+	err = commons.SelfUpgrade(newRelease)
+	if err != nil {
+		return xerrors.Errorf("failed to upgrade to new release: %w", err)
+	}
+
+	commons.Printf("Upgraded successfully! [%s => v%s]\n", myVersion, newRelease.Version())
 	return nil
 }
 
-func (upgrade *UpgradeCommand) upgrade() error {
-	return commons.SelfUpgrade()
+func (upgrade *UpgradeCommand) hasNewRelease(myVersion string, latestVersion string) bool {
+	mv1, mv2, mv3 := commons.GetVersionParts(myVersion)
+	lv1, lv2, lv3 := commons.GetVersionParts(latestVersion)
+
+	myVersionParts := []int{mv1, mv2, mv3}
+	latestVersionParts := []int{lv1, lv2, lv3}
+
+	return commons.IsNewerVersion(latestVersionParts, myVersionParts)
 }

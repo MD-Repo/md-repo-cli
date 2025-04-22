@@ -13,7 +13,7 @@ var (
 )
 
 func SetSubmissionListFlags(command *cobra.Command) {
-	command.Flags().StringVar(&submissionListFlagValues.OrcID, "orcid", "", "Specify ORC-ID")
+	command.Flags().StringVar(&submissionListFlagValues.OrcID, "orcid", "", "Set ORC-ID")
 }
 
 func GetSubmissionListFlagValues() *SubmissionListFlagValues {

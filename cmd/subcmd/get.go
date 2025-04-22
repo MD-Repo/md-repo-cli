@@ -8,6 +8,7 @@ import (
 	"time"
 
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
+	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	irodsclient_util "github.com/cyverse/go-irodsclient/irods/util"
 	"github.com/jedib0t/go-pretty/v6/progress"
 
@@ -33,7 +34,7 @@ func AddGetCommand(rootCmd *cobra.Command) {
 
 	flag.SetTokenFlags(getCmd)
 	flag.SetForceFlags(getCmd, false)
-	flag.SetParallelTransferFlags(getCmd, false)
+	flag.SetParallelTransferFlags(getCmd, false, false)
 	flag.SetProgressFlags(getCmd)
 	flag.SetRetryFlags(getCmd)
 	flag.SetTransferReportFlags(getCmd)
@@ -53,6 +54,7 @@ func processGetCommand(command *cobra.Command, args []string) error {
 type GetCommand struct {
 	command *cobra.Command
 
+	commonFlagValues           *flag.CommonFlagValues
 	tokenFlagValues            *flag.TokenFlagValues
 	forceFlagValues            *flag.ForceFlagValues
 	parallelTransferFlagValues *flag.ParallelTransferFlagValues
@@ -62,6 +64,7 @@ type GetCommand struct {
 
 	maxConnectionNum int
 
+	account    *irodsclient_types.IRODSAccount
 	filesystem *irodsclient_fs.FileSystem
 
 	targetPath string
@@ -75,6 +78,7 @@ func NewGetCommand(command *cobra.Command, args []string) (*GetCommand, error) {
 	get := &GetCommand{
 		command: command,
 
+		commonFlagValues:           flag.GetCommonFlagValues(command),
 		tokenFlagValues:            flag.GetTokenFlagValues(),
 		forceFlagValues:            flag.GetForceFlagValues(),
 		parallelTransferFlagValues: flag.GetParallelTransferFlagValues(),
@@ -191,7 +195,7 @@ func (get *GetCommand) processTicket(mdRepoTicket commons.MDRepoTicket) error {
 	defer get.filesystem.Release()
 
 	// parallel job manager
-	get.parallelJobManager = commons.NewParallelJobManager(get.filesystem, get.parallelTransferFlagValues.ThreadNumber, !get.progressFlagValues.NoProgress, false)
+	get.parallelJobManager = commons.NewParallelJobManager(get.filesystem, get.parallelTransferFlagValues.ThreadNumber, !get.progressFlagValues.NoProgress, get.progressFlagValues.ShowFullPath)
 	get.parallelJobManager.Start()
 
 	// run
@@ -213,7 +217,6 @@ func (get *GetCommand) processTicket(mdRepoTicket commons.MDRepoTicket) error {
 		return xerrors.Errorf("failed to get %q to %q: %w", mdRepoTicket.IRODSDataPath, dataTargetPath, err)
 	}
 
-	// release parallel job manager
 	get.parallelJobManager.DoneScheduling()
 	err = get.parallelJobManager.Wait()
 	if err != nil {
@@ -272,12 +275,14 @@ func (get *GetCommand) getOne(mdRepoTicket commons.MDRepoTicket, targetPath stri
 	return get.getFile(sourceEntry, "", targetPath)
 }
 
-func (get *GetCommand) scheduleGet(sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string) error {
+func (get *GetCommand) scheduleGet(sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string, resume bool) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "subcmd",
 		"struct":   "GetCommand",
 		"function": "scheduleGet",
 	})
+
+	threadsRequired := get.calculateThreadForTransferJob(sourceEntry.Size)
 
 	getTask := func(job *commons.ParallelJob) error {
 		manager := job.GetManager()
@@ -300,26 +305,27 @@ func (get *GetCommand) scheduleGet(sourceEntry *irodsclient_fs.Entry, tempPath s
 			downloadPath = tempPath
 		}
 
+		parentDownloadPath := filepath.Dir(downloadPath)
+		err := os.MkdirAll(parentDownloadPath, 0766)
+		if err != nil {
+			job.Progress(-1, sourceEntry.Size, true)
+			return xerrors.Errorf("failed to make a directory %q: %w", parentDownloadPath, err)
+		}
+
 		// determine how to download
-		if get.parallelTransferFlagValues.SingleThread || get.parallelTransferFlagValues.ThreadNumber == 1 {
+		transferMode := get.determineTransferMode(sourceEntry.Size)
+		switch transferMode {
+		case commons.TransferModeRedirect:
+			downloadResult, downloadErr = fs.DownloadFileRedirectToResource(sourceEntry.Path, "", downloadPath, threadsRequired, true, callbackGet)
+			notes = append(notes, "redirect-to-resource")
+		case commons.TransferModeSingleThread:
 			downloadResult, downloadErr = fs.DownloadFile(sourceEntry.Path, "", downloadPath, true, callbackGet)
 			notes = append(notes, "icat", "single-thread")
-		} else if get.parallelTransferFlagValues.RedirectToResource {
-			downloadResult, downloadErr = fs.DownloadFileRedirectToResource(sourceEntry.Path, "", downloadPath, 0, true, callbackGet)
-			notes = append(notes, "redirect-to-resource")
-		} else if get.parallelTransferFlagValues.Icat {
-			downloadResult, downloadErr = fs.DownloadFileParallel(sourceEntry.Path, "", downloadPath, 0, true, callbackGet)
+		case commons.TransferModeICAT:
+			fallthrough
+		default:
+			downloadResult, downloadErr = fs.DownloadFileParallel(sourceEntry.Path, "", downloadPath, threadsRequired, true, callbackGet)
 			notes = append(notes, "icat", "multi-thread")
-		} else {
-			// auto
-			if sourceEntry.Size >= commons.RedirectToResourceMinSize {
-				// redirect-to-resource
-				downloadResult, downloadErr = fs.DownloadFileRedirectToResource(sourceEntry.Path, "", downloadPath, 0, true, callbackGet)
-				notes = append(notes, "redirect-to-resource")
-			} else {
-				downloadResult, downloadErr = fs.DownloadFileParallel(sourceEntry.Path, "", downloadPath, 0, true, callbackGet)
-				notes = append(notes, "icat", "multi-thread")
-			}
 		}
 
 		if downloadErr != nil {
@@ -327,7 +333,7 @@ func (get *GetCommand) scheduleGet(sourceEntry *irodsclient_fs.Entry, tempPath s
 			return xerrors.Errorf("failed to download %q to %q: %w", sourceEntry.Path, targetPath, downloadErr)
 		}
 
-		err := get.transferReportManager.AddTransfer(downloadResult, commons.TransferMethodGet, downloadErr, notes)
+		err = get.transferReportManager.AddTransfer(downloadResult, commons.TransferMethodGet, downloadErr, notes)
 		if err != nil {
 			job.Progress(-1, sourceEntry.Size, true)
 			return xerrors.Errorf("failed to add transfer report: %w", err)
@@ -340,13 +346,12 @@ func (get *GetCommand) scheduleGet(sourceEntry *irodsclient_fs.Entry, tempPath s
 		return nil
 	}
 
-	threadsRequired := irodsclient_util.GetNumTasksForParallelTransfer(sourceEntry.Size)
 	err := get.parallelJobManager.Schedule(sourceEntry.Path, getTask, threadsRequired, progress.UnitsBytes)
 	if err != nil {
 		return xerrors.Errorf("failed to schedule download %q to %q: %w", sourceEntry.Path, targetPath, err)
 	}
 
-	logger.Debugf("scheduled a data object download %q to %q", sourceEntry.Path, targetPath)
+	logger.Debugf("scheduled a data object download %q to %q, %d threads", sourceEntry.Path, targetPath, threadsRequired)
 
 	return nil
 }
@@ -358,14 +363,14 @@ func (get *GetCommand) getFile(sourceEntry *irodsclient_fs.Entry, tempPath strin
 		"function": "getFile",
 	})
 
-	commons.MarkPathMap(get.updatedPathMap, targetPath)
+	commons.MarkLocalPathMap(get.updatedPathMap, targetPath)
 
 	targetStat, err := os.Stat(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// target does not exist
 			// target must be a file with new name
-			return get.scheduleGet(sourceEntry, tempPath, targetPath)
+			return get.scheduleGet(sourceEntry, tempPath, targetPath, false)
 		}
 
 		return xerrors.Errorf("failed to stat %q: %w", targetPath, err)
@@ -415,11 +420,11 @@ func (get *GetCommand) getFile(sourceEntry *irodsclient_fs.Entry, tempPath strin
 	}
 
 	// schedule
-	return get.scheduleGet(sourceEntry, tempPath, targetPath)
+	return get.scheduleGet(sourceEntry, tempPath, targetPath, false)
 }
 
 func (get *GetCommand) getDir(sourceEntry *irodsclient_fs.Entry, targetPath string) error {
-	commons.MarkPathMap(get.updatedPathMap, targetPath)
+	commons.MarkLocalPathMap(get.updatedPathMap, targetPath)
 
 	targetStat, err := os.Stat(targetPath)
 	if err != nil {
@@ -477,4 +482,38 @@ func (get *GetCommand) getDir(sourceEntry *irodsclient_fs.Entry, targetPath stri
 	}
 
 	return nil
+}
+
+func (get *GetCommand) calculateThreadForTransferJob(size int64) int {
+	threads := commons.CalculateThreadForTransferJob(size, get.parallelTransferFlagValues.ThreadNumber)
+
+	// determine how to download
+	if get.parallelTransferFlagValues.SingleThread || get.parallelTransferFlagValues.ThreadNumber == 1 {
+		return 1
+	}
+
+	return threads
+}
+
+func (get *GetCommand) determineTransferMode(size int64) commons.TransferMode {
+	threadsRequired := get.calculateThreadForTransferJob(size)
+
+	if threadsRequired == 1 {
+		return commons.TransferModeSingleThread
+	}
+
+	if get.parallelTransferFlagValues.SingleThread || get.parallelTransferFlagValues.ThreadNumber == 1 {
+		return commons.TransferModeSingleThread
+	} else if get.parallelTransferFlagValues.RedirectToResource {
+		return commons.TransferModeRedirect
+	} else if get.parallelTransferFlagValues.Icat {
+		return commons.TransferModeICAT
+	}
+
+	// auto
+	//if size >= commons.RedirectToResourceMinSize {
+	//	return commons.TransferModeRedirect
+	//}
+
+	return commons.TransferModeICAT
 }

@@ -10,6 +10,10 @@ import (
 	"golang.org/x/xerrors"
 )
 
+const (
+	minSizePrioritizedTransfer int64 = 1024 * 1024 * 1024
+)
+
 type ParallelJobTask func(job *ParallelJob) error
 
 type ParallelJob struct {
@@ -50,6 +54,10 @@ func newParallelJob(manager *ParallelJobManager, index int64, name string, task 
 }
 
 type ParallelJobManager struct {
+	// moved to top to avoid 64bit alignment issue
+	jobsScheduledCounter int64
+	jobsDoneCounter      int64
+
 	filesystem              *irodsclient_fs.FileSystem
 	nextJobIndex            int64
 	pendingJobs             chan *ParallelJob
@@ -64,10 +72,7 @@ type ParallelJobManager struct {
 
 	availableThreadWaitCondition *sync.Cond // used for checking available threads
 	scheduleWait                 sync.WaitGroup
-	jobWait                      sync.WaitGroup
-
-	jobsScheduledCounter int64
-	jobsDoneCounter      int64
+	processWait                  sync.WaitGroup
 }
 
 // NewParallelJobManager creates a new ParallelJobManager
@@ -85,7 +90,7 @@ func NewParallelJobManager(fs *irodsclient_fs.FileSystem, maxThreads int, showPr
 		lastError:               nil,
 		mutex:                   sync.RWMutex{},
 		scheduleWait:            sync.WaitGroup{},
-		jobWait:                 sync.WaitGroup{},
+		processWait:             sync.WaitGroup{},
 
 		jobsScheduledCounter: 0,
 		jobsDoneCounter:      0,
@@ -129,7 +134,7 @@ func (manager *ParallelJobManager) Schedule(name string, task ParallelJobTask, t
 	manager.mutex.Unlock()
 
 	manager.pendingJobs <- job
-	manager.jobWait.Add(1)
+	manager.processWait.Add(1)
 	atomic.AddInt64(&manager.jobsScheduledCounter, 1)
 
 	return nil
@@ -150,7 +155,7 @@ func (manager *ParallelJobManager) Wait() error {
 	logger.Debug("waiting schedule-wait")
 	manager.scheduleWait.Wait()
 	logger.Debug("waiting job-wait")
-	manager.jobWait.Wait()
+	manager.processWait.Wait()
 
 	manager.mutex.RLock()
 	defer manager.mutex.RUnlock()
@@ -275,6 +280,8 @@ func (manager *ParallelJobManager) Start() {
 				logger.Debugf("# threads : %d, max %d", currentThreads, manager.maxThreads)
 
 				go func(pjob *ParallelJob) {
+					defer manager.processWait.Done()
+
 					logger.Debugf("Run job %d, %q", pjob.index, pjob.name)
 
 					err := pjob.task(pjob)
@@ -289,26 +296,25 @@ func (manager *ParallelJobManager) Start() {
 						// don't stop here
 					}
 
+					manager.mutex.Lock()
 					currentThreads -= pjob.threadsRequired
+					manager.availableThreadWaitCondition.Broadcast()
+					manager.mutex.Unlock()
+
 					logger.Debugf("# threads : %d, max %d", currentThreads, manager.maxThreads)
 
 					if pjob.done {
 						// increase jobs done counter
 						atomic.AddInt64(&manager.jobsDoneCounter, 1)
 					}
-
-					manager.jobWait.Done()
-
-					manager.mutex.Lock()
-					manager.availableThreadWaitCondition.Broadcast()
-					manager.mutex.Unlock()
 				}(job)
 
 				manager.mutex.Unlock()
 			} else {
-				manager.jobWait.Done()
+				manager.processWait.Done()
 			}
 		}
-		manager.jobWait.Wait()
+
+		manager.processWait.Wait()
 	}()
 }

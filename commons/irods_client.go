@@ -18,8 +18,32 @@ func GetIRODSFSClient(account *irodsclient_types.IRODSAccount) (*irodsclient_fs.
 	fsConfig.IOConnection.OperationTimeout = FilesystemTimeout
 
 	// set tcp buffer size
-	fsConfig.MetadataConnection.TCPBufferSize = TCPBufferSizeDefault
-	fsConfig.IOConnection.TCPBufferSize = TCPBufferSizeDefault
+	fsConfig.MetadataConnection.TCPBufferSize = GetDefaultTCPBufferSize()
+	fsConfig.IOConnection.TCPBufferSize = GetDefaultTCPBufferSize()
+
+	return irodsclient_fs.NewFileSystem(account, fsConfig)
+}
+
+// GetIRODSFSClientForSingleOperation returns a file system client for single operation
+func GetIRODSFSClientForSingleOperation(account *irodsclient_types.IRODSAccount) (*irodsclient_fs.FileSystem, error) {
+	fsConfig := irodsclient_fs.NewFileSystemConfig(ClientProgramName)
+
+	// set operation time out
+	fsConfig.MetadataConnection.OperationTimeout = FilesystemTimeout
+	fsConfig.IOConnection.OperationTimeout = FilesystemTimeout
+
+	// set tcp buffer size
+	fsConfig.MetadataConnection.TCPBufferSize = GetDefaultTCPBufferSize()
+	fsConfig.IOConnection.TCPBufferSize = GetDefaultTCPBufferSize()
+
+	// cache timeout
+	// infinite
+	infiniteDuration := irodsclient_types.Duration(365 * 24 * time.Hour) // 1y (almost infinite)
+
+	fsConfig.Cache.Timeout = infiniteDuration
+	fsConfig.Cache.CleanupTime = infiniteDuration
+	fsConfig.Cache.InvalidateParentEntryCacheImmediately = true
+	fsConfig.Cache.StartNewTransaction = false
 
 	return irodsclient_fs.NewFileSystem(account, fsConfig)
 }

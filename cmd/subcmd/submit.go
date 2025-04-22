@@ -37,7 +37,7 @@ func AddSubmitCommand(rootCmd *cobra.Command) {
 	flag.SetSubmissionFlags(submitCmd)
 	flag.SetTokenFlags(submitCmd)
 	flag.SetForceFlags(submitCmd, true)
-	flag.SetParallelTransferFlags(submitCmd, true)
+	flag.SetParallelTransferFlags(submitCmd, false, false)
 	flag.SetProgressFlags(submitCmd)
 	flag.SetRetryFlags(submitCmd)
 	flag.SetTransferReportFlags(submitCmd)
@@ -57,6 +57,7 @@ func processSubmitCommand(command *cobra.Command, args []string) error {
 type SubmitCommand struct {
 	command *cobra.Command
 
+	commonFlagValues           *flag.CommonFlagValues
 	submissionFlagValues       *flag.SubmissionFlagValues
 	tokenFlagValues            *flag.TokenFlagValues
 	forceFlagValues            *flag.ForceFlagValues
@@ -82,6 +83,7 @@ func NewSubmitCommand(command *cobra.Command, args []string) (*SubmitCommand, er
 	submit := &SubmitCommand{
 		command: command,
 
+		commonFlagValues:           flag.GetCommonFlagValues(command),
 		submissionFlagValues:       flag.GetSubmissionFlagValues(),
 		tokenFlagValues:            flag.GetTokenFlagValues(),
 		forceFlagValues:            flag.GetForceFlagValues(),
@@ -93,7 +95,7 @@ func NewSubmitCommand(command *cobra.Command, args []string) (*SubmitCommand, er
 		updatedPathMap: map[string]bool{},
 	}
 
-	submit.maxConnectionNum = submit.parallelTransferFlagValues.ThreadNumber + 2 // 2 for metadata op
+	submit.maxConnectionNum = submit.parallelTransferFlagValues.ThreadNumber
 
 	// path
 	submit.sourcePaths = args
@@ -245,7 +247,7 @@ func (submit *SubmitCommand) Process() error {
 		defer submit.filesystem.Release()
 
 		// parallel job manager
-		submit.parallelJobManager = commons.NewParallelJobManager(submit.filesystem, submit.parallelTransferFlagValues.ThreadNumber, !submit.progressFlagValues.NoProgress, false)
+		submit.parallelJobManager = commons.NewParallelJobManager(submit.filesystem, submit.parallelTransferFlagValues.ThreadNumber, !submit.progressFlagValues.NoProgress, submit.progressFlagValues.ShowFullPath)
 		submit.parallelJobManager.Start()
 
 		// submit status file
@@ -450,6 +452,8 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 		"function": "scheduleSubmit",
 	})
 
+	threadsRequired := submit.calculateThreadForTransferJob(sourceStat.Size())
+
 	submitTask := func(job *commons.ParallelJob) error {
 		manager := job.GetManager()
 		fs := manager.GetFilesystem()
@@ -467,25 +471,19 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 		notes := []string{}
 
 		// determine how to upload
-		if submit.parallelTransferFlagValues.SingleThread || submit.parallelTransferFlagValues.ThreadNumber == 1 {
+		transferMode := submit.determineTransferMode(sourceStat.Size())
+		switch transferMode {
+		case commons.TransferModeRedirect:
+			uploadResult, uploadErr = fs.UploadFileRedirectToResource(sourcePath, targetPath, "", threadsRequired, false, true, true, false, callbackSubmit)
+			notes = append(notes, "redirect-to-resource")
+		case commons.TransferModeSingleThread:
 			uploadResult, uploadErr = fs.UploadFile(sourcePath, targetPath, "", false, true, true, false, callbackSubmit)
 			notes = append(notes, "icat", "single-thread")
-		} else if submit.parallelTransferFlagValues.RedirectToResource {
-			uploadResult, uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetPath, "", 0, false, true, true, false, callbackSubmit)
-			notes = append(notes, "redirect-to-resource")
-		} else if submit.parallelTransferFlagValues.Icat {
-			uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", 0, false, true, true, false, callbackSubmit)
+		case commons.TransferModeICAT:
+			fallthrough
+		default:
+			uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", threadsRequired, false, true, true, false, callbackSubmit)
 			notes = append(notes, "icat", "multi-thread")
-		} else {
-			// auto
-			if sourceStat.Size() >= commons.RedirectToResourceMinSize {
-				// redirect-to-resource
-				uploadResult, uploadErr = fs.UploadFileParallelRedirectToResource(sourcePath, targetPath, "", 0, false, true, true, false, callbackSubmit)
-				notes = append(notes, "redirect-to-resource")
-			} else {
-				uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", 0, false, true, true, false, callbackSubmit)
-				notes = append(notes, "icat", "multi-thread")
-			}
 		}
 
 		if uploadErr != nil {
@@ -525,7 +523,6 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 	submit.submitStatusFile.AddFile(submitStatusEntry)
 
 	// schedule
-	threadsRequired := submit.computeThreadsRequired(sourceStat.Size())
 	err = submit.parallelJobManager.Schedule(sourcePath, submitTask, threadsRequired, progress.UnitsBytes)
 	if err != nil {
 		return xerrors.Errorf("failed to schedule upload %q to %q: %w", sourcePath, targetPath, err)
@@ -543,7 +540,7 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 		"function": "submitFile",
 	})
 
-	commons.MarkPathMap(submit.updatedPathMap, targetPath)
+	commons.MarkIRODSPathMap(submit.updatedPathMap, targetPath)
 
 	targetEntry, err := submit.filesystem.Stat(targetPath)
 	if err != nil {
@@ -622,7 +619,7 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 }
 
 func (submit *SubmitCommand) submitDir(sourceStat fs.FileInfo, sourcePath string, targetRootPath string, targetPath string) error {
-	commons.MarkPathMap(submit.updatedPathMap, targetPath)
+	commons.MarkIRODSPathMap(submit.updatedPathMap, targetPath)
 
 	targetEntry, err := submit.filesystem.Stat(targetPath)
 	if err != nil {
@@ -693,19 +690,49 @@ func (submit *SubmitCommand) submitDir(sourceStat fs.FileInfo, sourcePath string
 	return nil
 }
 
-func (submit *SubmitCommand) computeThreadsRequired(size int64) int {
-	if submit.parallelTransferFlagValues.SingleThread {
+func (submit *SubmitCommand) calculateThreadForTransferJob(size int64) int {
+	threads := commons.CalculateThreadForTransferJob(size, submit.parallelTransferFlagValues.ThreadNumber)
+
+	// determine how to upload
+	if submit.parallelTransferFlagValues.SingleThread || submit.parallelTransferFlagValues.ThreadNumber == 1 {
+		return 1
+	} else if submit.parallelTransferFlagValues.Icat && !submit.filesystem.SupportParallelUpload() {
+		return 1
+	} else if submit.parallelTransferFlagValues.RedirectToResource || submit.parallelTransferFlagValues.Icat {
+		return threads
+	}
+
+	//if size < commons.RedirectToResourceMinSize && !put.filesystem.SupportParallelUpload() {
+	//	// icat
+	//	return 1
+	//}
+
+	if !submit.filesystem.SupportParallelUpload() {
 		return 1
 	}
 
-	if submit.filesystem.SupportParallelUpload() {
-		numTasks := irodsclient_util.GetNumTasksForParallelTransfer(size)
-		if submit.parallelTransferFlagValues.ThreadNumber < numTasks {
-			return submit.parallelTransferFlagValues.ThreadNumber
-		}
+	return threads
+}
 
-		return numTasks
+func (submit *SubmitCommand) determineTransferMode(size int64) commons.TransferMode {
+	threadsRequired := submit.calculateThreadForTransferJob(size)
+
+	if threadsRequired == 1 {
+		return commons.TransferModeSingleThread
 	}
 
-	return 1
+	if submit.parallelTransferFlagValues.SingleThread || submit.parallelTransferFlagValues.ThreadNumber == 1 {
+		return commons.TransferModeSingleThread
+	} else if submit.parallelTransferFlagValues.RedirectToResource {
+		return commons.TransferModeRedirect
+	} else if submit.parallelTransferFlagValues.Icat {
+		return commons.TransferModeICAT
+	}
+
+	// auto
+	//if size >= commons.RedirectToResourceMinSize {
+	//	return commons.TransferModeRedirect
+	//}
+
+	return commons.TransferModeICAT
 }

@@ -3,6 +3,7 @@ package subcmd
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -21,7 +22,7 @@ import (
 
 var getCmd = &cobra.Command{
 	Use:     "get [local dir]",
-	Short:   "Download MD-Repo data to local dir",
+	Short:   "Download MD-Repo data to a local directory",
 	Aliases: []string{"download", "down"},
 	Long:    `This downloads MD-Repo data to the given local directory.`,
 	RunE:    processGetCommand,
@@ -34,7 +35,7 @@ func AddGetCommand(rootCmd *cobra.Command) {
 
 	flag.SetTokenFlags(getCmd)
 	flag.SetForceFlags(getCmd, false)
-	flag.SetParallelTransferFlags(getCmd, false, false)
+	flag.SetParallelTransferFlags(getCmd, false, false, false)
 	flag.SetProgressFlags(getCmd)
 	flag.SetRetryFlags(getCmd)
 	flag.SetTransferReportFlags(getCmd)
@@ -172,7 +173,7 @@ func (get *GetCommand) Process() error {
 
 	// we may further optimize this by run it parallel
 	for _, mdRepoTicket := range mdRepoTickets {
-		err = get.processTicket(mdRepoTicket)
+		err = get.processTicket(&mdRepoTicket)
 		if err != nil {
 			return err
 		}
@@ -180,10 +181,10 @@ func (get *GetCommand) Process() error {
 	return nil
 }
 
-func (get *GetCommand) processTicket(mdRepoTicket commons.MDRepoTicket) error {
+func (get *GetCommand) processTicket(mdRepoTicket *commons.MDRepoTicket) error {
 	// we create filesystem, job manager for every ticket as they require separate auth
 	// Create a file system
-	account, err := commons.GetAccount(&mdRepoTicket)
+	account, err := commons.GetAccount(mdRepoTicket)
 	if err != nil {
 		return xerrors.Errorf("failed to get iRODS Account: %w", err)
 	}
@@ -246,7 +247,7 @@ func (get *GetCommand) ensureTargetIsDir(targetPath string) error {
 	return nil
 }
 
-func (get *GetCommand) getOne(mdRepoTicket commons.MDRepoTicket, targetPath string) error {
+func (get *GetCommand) getOne(mdRepoTicket *commons.MDRepoTicket, targetPath string) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "subcmd",
 		"struct":   "GetCommand",
@@ -267,15 +268,15 @@ func (get *GetCommand) getOne(mdRepoTicket commons.MDRepoTicket, targetPath stri
 	if sourceEntry.IsDir() {
 		// dir
 		targetPath = commons.MakeTargetLocalFilePath(sourcePath, targetPath)
-		return get.getDir(sourceEntry, targetPath)
+		return get.getDir(mdRepoTicket, sourceEntry, targetPath)
 	}
 
 	// file
 	targetPath = commons.MakeTargetLocalFilePath(sourcePath, targetPath)
-	return get.getFile(sourceEntry, "", targetPath)
+	return get.getFile(mdRepoTicket, sourceEntry, "", targetPath)
 }
 
-func (get *GetCommand) scheduleGet(sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string, resume bool) error {
+func (get *GetCommand) scheduleGet(mdRepoTicket *commons.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string, resume bool) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "subcmd",
 		"struct":   "GetCommand",
@@ -317,15 +318,15 @@ func (get *GetCommand) scheduleGet(sourceEntry *irodsclient_fs.Entry, tempPath s
 		switch transferMode {
 		case commons.TransferModeRedirect:
 			downloadResult, downloadErr = fs.DownloadFileRedirectToResource(sourceEntry.Path, "", downloadPath, threadsRequired, true, callbackGet)
-			notes = append(notes, "redirect-to-resource")
-		case commons.TransferModeSingleThread:
-			downloadResult, downloadErr = fs.DownloadFile(sourceEntry.Path, "", downloadPath, true, callbackGet)
-			notes = append(notes, "icat", "single-thread")
+			notes = append(notes, "redirect-to-resource", fmt.Sprintf("%d threads", threadsRequired))
+		case commons.TransferModeWebDAV:
+			downloadResult, downloadErr = commons.DownloadFileWebDAV(sourceEntry, downloadPath, mdRepoTicket.IRODSTicket, callbackGet)
+			notes = append(notes, "webdav")
 		case commons.TransferModeICAT:
 			fallthrough
 		default:
 			downloadResult, downloadErr = fs.DownloadFileParallel(sourceEntry.Path, "", downloadPath, threadsRequired, true, callbackGet)
-			notes = append(notes, "icat", "multi-thread")
+			notes = append(notes, "icat", fmt.Sprintf("%d threads", threadsRequired))
 		}
 
 		if downloadErr != nil {
@@ -356,7 +357,7 @@ func (get *GetCommand) scheduleGet(sourceEntry *irodsclient_fs.Entry, tempPath s
 	return nil
 }
 
-func (get *GetCommand) getFile(sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string) error {
+func (get *GetCommand) getFile(mdRepoTicket *commons.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "subcmd",
 		"struct":   "GetCommand",
@@ -370,7 +371,7 @@ func (get *GetCommand) getFile(sourceEntry *irodsclient_fs.Entry, tempPath strin
 		if os.IsNotExist(err) {
 			// target does not exist
 			// target must be a file with new name
-			return get.scheduleGet(sourceEntry, tempPath, targetPath, false)
+			return get.scheduleGet(mdRepoTicket, sourceEntry, tempPath, targetPath, false)
 		}
 
 		return xerrors.Errorf("failed to stat %q: %w", targetPath, err)
@@ -420,10 +421,10 @@ func (get *GetCommand) getFile(sourceEntry *irodsclient_fs.Entry, tempPath strin
 	}
 
 	// schedule
-	return get.scheduleGet(sourceEntry, tempPath, targetPath, false)
+	return get.scheduleGet(mdRepoTicket, sourceEntry, tempPath, targetPath, false)
 }
 
-func (get *GetCommand) getDir(sourceEntry *irodsclient_fs.Entry, targetPath string) error {
+func (get *GetCommand) getDir(mdRepoTicket *commons.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, targetPath string) error {
 	commons.MarkLocalPathMap(get.updatedPathMap, targetPath)
 
 	targetStat, err := os.Stat(targetPath)
@@ -468,13 +469,13 @@ func (get *GetCommand) getDir(sourceEntry *irodsclient_fs.Entry, targetPath stri
 
 		if entry.IsDir() {
 			// dir
-			err = get.getDir(entry, newEntryPath)
+			err = get.getDir(mdRepoTicket, entry, newEntryPath)
 			if err != nil {
 				return err
 			}
 		} else {
 			// file
-			err = get.getFile(entry, "", newEntryPath)
+			err = get.getFile(mdRepoTicket, entry, "", newEntryPath)
 			if err != nil {
 				return err
 			}
@@ -485,10 +486,10 @@ func (get *GetCommand) getDir(sourceEntry *irodsclient_fs.Entry, targetPath stri
 }
 
 func (get *GetCommand) calculateThreadForTransferJob(size int64) int {
-	threads := commons.CalculateThreadForTransferJob(size, get.parallelTransferFlagValues.ThreadNumber)
+	threads := commons.CalculateThreadForTransferJob(size, get.parallelTransferFlagValues.ThreadNumberPerFile)
 
 	// determine how to download
-	if get.parallelTransferFlagValues.SingleThread || get.parallelTransferFlagValues.ThreadNumber == 1 {
+	if get.parallelTransferFlagValues.SingleThread || get.parallelTransferFlagValues.ThreadNumber == 1 || get.parallelTransferFlagValues.ThreadNumberPerFile == 1 {
 		return 1
 	}
 
@@ -496,18 +497,12 @@ func (get *GetCommand) calculateThreadForTransferJob(size int64) int {
 }
 
 func (get *GetCommand) determineTransferMode(size int64) commons.TransferMode {
-	threadsRequired := get.calculateThreadForTransferJob(size)
-
-	if threadsRequired == 1 {
-		return commons.TransferModeSingleThread
-	}
-
-	if get.parallelTransferFlagValues.SingleThread || get.parallelTransferFlagValues.ThreadNumber == 1 {
-		return commons.TransferModeSingleThread
-	} else if get.parallelTransferFlagValues.RedirectToResource {
+	if get.parallelTransferFlagValues.RedirectToResource {
 		return commons.TransferModeRedirect
 	} else if get.parallelTransferFlagValues.Icat {
 		return commons.TransferModeICAT
+	} else if get.parallelTransferFlagValues.WebDAV {
+		return commons.TransferModeWebDAV
 	}
 
 	// auto

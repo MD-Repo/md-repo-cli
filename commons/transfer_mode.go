@@ -3,13 +3,13 @@ package commons
 type TransferMode string
 
 const (
-	TransferModeSingleThread TransferMode = "single_thread"
-	TransferModeICAT         TransferMode = "icat"
-	TransferModeRedirect     TransferMode = "redirect"
+	TransferModeICAT     TransferMode = "icat"
+	TransferModeRedirect TransferMode = "redirect"
+	TransferModeWebDAV   TransferMode = "webdav"
 )
 
 func (t TransferMode) Valid() bool {
-	if t == TransferModeSingleThread || t == TransferModeICAT || t == TransferModeRedirect {
+	if t == TransferModeICAT || t == TransferModeRedirect || t == TransferModeWebDAV {
 		return true
 	}
 	return false

@@ -37,7 +37,7 @@ func AddSubmitCommand(rootCmd *cobra.Command) {
 	flag.SetSubmissionFlags(submitCmd)
 	flag.SetTokenFlags(submitCmd)
 	flag.SetForceFlags(submitCmd, true)
-	flag.SetParallelTransferFlags(submitCmd, false, false)
+	flag.SetParallelTransferFlags(submitCmd, false, false, true)
 	flag.SetProgressFlags(submitCmd)
 	flag.SetRetryFlags(submitCmd)
 	flag.SetTransferReportFlags(submitCmd)
@@ -475,15 +475,12 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 		switch transferMode {
 		case commons.TransferModeRedirect:
 			uploadResult, uploadErr = fs.UploadFileRedirectToResource(sourcePath, targetPath, "", threadsRequired, false, true, true, false, callbackSubmit)
-			notes = append(notes, "redirect-to-resource")
-		case commons.TransferModeSingleThread:
-			uploadResult, uploadErr = fs.UploadFile(sourcePath, targetPath, "", false, true, true, false, callbackSubmit)
-			notes = append(notes, "icat", "single-thread")
+			notes = append(notes, "redirect-to-resource", fmt.Sprintf("%d threads", threadsRequired))
 		case commons.TransferModeICAT:
 			fallthrough
 		default:
 			uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", threadsRequired, false, true, true, false, callbackSubmit)
-			notes = append(notes, "icat", "multi-thread")
+			notes = append(notes, "icat", fmt.Sprintf("%d threads", threadsRequired))
 		}
 
 		if uploadErr != nil {
@@ -691,10 +688,10 @@ func (submit *SubmitCommand) submitDir(sourceStat fs.FileInfo, sourcePath string
 }
 
 func (submit *SubmitCommand) calculateThreadForTransferJob(size int64) int {
-	threads := commons.CalculateThreadForTransferJob(size, submit.parallelTransferFlagValues.ThreadNumber)
+	threads := commons.CalculateThreadForTransferJob(size, submit.parallelTransferFlagValues.ThreadNumberPerFile)
 
 	// determine how to upload
-	if submit.parallelTransferFlagValues.SingleThread || submit.parallelTransferFlagValues.ThreadNumber == 1 {
+	if submit.parallelTransferFlagValues.SingleThread || submit.parallelTransferFlagValues.ThreadNumber == 1 || submit.parallelTransferFlagValues.ThreadNumberPerFile == 1 {
 		return 1
 	} else if submit.parallelTransferFlagValues.Icat && !submit.filesystem.SupportParallelUpload() {
 		return 1
@@ -715,15 +712,7 @@ func (submit *SubmitCommand) calculateThreadForTransferJob(size int64) int {
 }
 
 func (submit *SubmitCommand) determineTransferMode(size int64) commons.TransferMode {
-	threadsRequired := submit.calculateThreadForTransferJob(size)
-
-	if threadsRequired == 1 {
-		return commons.TransferModeSingleThread
-	}
-
-	if submit.parallelTransferFlagValues.SingleThread || submit.parallelTransferFlagValues.ThreadNumber == 1 {
-		return commons.TransferModeSingleThread
-	} else if submit.parallelTransferFlagValues.RedirectToResource {
+	if submit.parallelTransferFlagValues.RedirectToResource {
 		return commons.TransferModeRedirect
 	} else if submit.parallelTransferFlagValues.Icat {
 		return commons.TransferModeICAT

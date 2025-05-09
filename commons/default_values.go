@@ -9,18 +9,21 @@ import (
 const (
 	mdRepoPackagePath string = "MD-Repo/md-repo-cli"
 
-	ClientProgramName          string                     = "md-repo-cli"
-	FilesystemTimeout          irodsclient_types.Duration = irodsclient_types.Duration(10 * time.Minute)
-	transferThreadNumDefault   int                        = 5
-	tcpBufferSizeStringDefault string                     = "1MB"
+	ClientProgramName               string                     = "md-repo-cli"
+	FilesystemTimeout               irodsclient_types.Duration = irodsclient_types.Duration(10 * time.Minute)
+	transferThreadNumDefault        int                        = 5
+	transferThreadNumPerFileDefault int                        = 5
+	tcpBufferSizeStringDefault      string                     = "1MB"
 
 	// iRODS configuration
 	// Prod
-	mdRepoHost         string = "data.cyverse.org"
-	mdRepoPort         int    = 1247
-	mdRepoZone         string = "iplant"
-	mdRepoUser         string = "md-uploader"
-	mdRepoUserPassword string = ""
+	mdRepoHost            string = "data.cyverse.org"
+	mdRepoPort            int    = 1247
+	mdRepoZone            string = "iplant"
+	mdRepoUser            string = "md-uploader"
+	mdRepoUserPassword    string = ""
+	mdRepoWebDAVServerURL string = "https://data.cyverse.org"
+	mdRepoWebDAVPrefix    string = "/dav-anon"
 
 	mdRepoHome        string = "/" + mdRepoZone + "/home/shared/mdrepo/prod"
 	mdRepoLandingPath string = mdRepoHome + "/landing"
@@ -46,4 +49,7 @@ func GetDefaultTCPBufferSizeString() string {
 
 func GetDefaultTransferThreadNum() int {
 	return transferThreadNumDefault
+}
+func GetDefaultTransferThreadNumPerFile() int {
+	return transferThreadNumPerFileDefault
 }

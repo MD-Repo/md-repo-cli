@@ -17,7 +17,7 @@ func testDownloadFileFromWebDAV(t *testing.T) {
 	checksumBytes, _ := hex.DecodeString("d8f0c00cecd46e8efc9fe283228167a2")
 	sourceEntry := &irodsclient_fs.Entry{
 		ID:                12345,
-		Path:              "/cyverse.dev/home/iychoi/abc.txt",
+		Path:              "/iplant/home/iychoi/abc.txt",
 		Name:              "abc.txt",
 		Size:              19,
 		CheckSum:          checksumBytes,
@@ -25,7 +25,7 @@ func testDownloadFileFromWebDAV(t *testing.T) {
 	}
 
 	localPath := "/tmp/test.txt"
-	ticket := "cvsksdjj1d2fi20i01u0"
+	ticket := "d0h20krj1d295436l270"
 
 	callback := func(progress int64, total int64) {
 		// This is a dummy callback function
@@ -37,6 +37,6 @@ func testDownloadFileFromWebDAV(t *testing.T) {
 
 	os.Remove(localPath) // Clean up the test file
 
-	assert.Equal(t, "/cyverse.dev/home/iychoi/abc.txt", transferResult.IRODSPath)
+	assert.Equal(t, sourceEntry.Path, transferResult.IRODSPath)
 	t.Log("Transfer Result:", transferResult)
 }

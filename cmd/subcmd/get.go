@@ -26,7 +26,7 @@ var getCmd = &cobra.Command{
 	Aliases: []string{"download", "down"},
 	Long:    `This downloads MD-Repo data to the given local directory.`,
 	RunE:    processGetCommand,
-	Args:    cobra.ExactArgs(1),
+	Args:    cobra.MaximumNArgs(1),
 }
 
 func AddGetCommand(rootCmd *cobra.Command) {

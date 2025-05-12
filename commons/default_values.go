@@ -29,7 +29,6 @@ const (
 	mdRepoLandingPath string = mdRepoHome + "/landing"
 	mdRepoReleasePath string = mdRepoHome + "/release"
 
-	//mdRepoURL string = "http://128.196.65.71:8000"
 	mdRepoURL               string = "https://mdrepo.org"
 	mdRepoGetTicketApi      string = "/api/v1/get_ticket"
 	mdRepoVerifyMetadataApi string = "/api/v1/verify_metadata"

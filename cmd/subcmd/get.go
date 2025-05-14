@@ -510,5 +510,5 @@ func (get *GetCommand) determineTransferMode(size int64) commons.TransferMode {
 	//	return commons.TransferModeRedirect
 	//}
 
-	return commons.TransferModeICAT
+	return commons.TransferModeWebDAV
 }

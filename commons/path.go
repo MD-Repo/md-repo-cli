@@ -44,16 +44,19 @@ func MakeLocalPath(localPath string) string {
 	return filepath.Clean(absLocalPath)
 }
 
-func MakeTargetIRODSFilePath(filesystem *irodsclient_fs.FileSystem, source string, target string) string {
-	if filesystem.ExistsDir(target) {
-		// make full file name for target
-		filename := GetBasename(source)
-		return path.Join(target, filename)
+func MakeTargetIRODSFilePath(filesystem *irodsclient_fs.FileSystem, source string, target string, createSub bool) string {
+	if createSub {
+		if filesystem.ExistsDir(target) {
+			// make full file name for target
+			filename := GetBasename(source)
+			return path.Join(target, filename)
+		}
 	}
+
 	return target
 }
 
-func MakeTargetLocalFilePath(source string, target string) string {
+func MakeTargetLocalFilePath(source string, target string, createSub bool) string {
 	realTarget, err := ResolveSymlink(target)
 	if err != nil {
 		return target
@@ -61,11 +64,14 @@ func MakeTargetLocalFilePath(source string, target string) string {
 
 	st, err := os.Stat(realTarget)
 	if err == nil {
-		if st.IsDir() {
-			// make full file name for target
-			filename := GetBasename(source)
-			return filepath.Join(target, filename)
+		if createSub {
+			if st.IsDir() {
+				// make full file name for target
+				filename := GetBasename(source)
+				return filepath.Join(target, filename)
+			}
 		}
+
 	}
 	return target
 }

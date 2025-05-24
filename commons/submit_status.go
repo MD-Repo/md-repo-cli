@@ -111,7 +111,7 @@ func getStatusFilename(status SubmitStatus) string {
 
 func (s *SubmitStatusFile) CreateStatusFile(filesystem *fs.FileSystem, dataRootPath string) error {
 	statusFileName := s.GetStatusFilename()
-	statusFilePath := MakeTargetIRODSFilePath(filesystem, statusFileName, dataRootPath)
+	statusFilePath := MakeTargetIRODSFilePath(filesystem, statusFileName, dataRootPath, true)
 
 	jsonBytes, err := json.Marshal(s)
 	if err != nil {

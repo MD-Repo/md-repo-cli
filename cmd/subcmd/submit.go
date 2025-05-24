@@ -436,12 +436,12 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 
 	if sourceStat.IsDir() {
 		// dir
-		targetPath = commons.MakeTargetLocalFilePath(sourcePath, targetPath)
+		targetPath = commons.MakeTargetIRODSFilePath(submit.filesystem, sourcePath, targetPath, true)
 		return submit.submitDir(sourceStat, sourcePath, targetRootPath, targetPath)
 	}
 
 	// file
-	targetPath = commons.MakeTargetIRODSFilePath(submit.filesystem, sourcePath, targetPath)
+	targetPath = commons.MakeTargetIRODSFilePath(submit.filesystem, sourcePath, targetPath, true)
 	return submit.submitFile(sourceStat, sourcePath, targetRootPath, targetPath)
 }
 
@@ -656,7 +656,7 @@ func (submit *SubmitCommand) submitDir(sourceStat fs.FileInfo, sourcePath string
 	}
 
 	for _, entry := range entries {
-		newEntryPath := commons.MakeTargetIRODSFilePath(submit.filesystem, entry.Name(), targetPath)
+		newEntryPath := commons.MakeTargetIRODSFilePath(submit.filesystem, entry.Name(), targetPath, true)
 
 		entryPath := filepath.Join(sourcePath, entry.Name())
 

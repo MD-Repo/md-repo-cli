@@ -267,12 +267,12 @@ func (get *GetCommand) getOne(mdRepoTicket *commons.MDRepoTicket, targetPath str
 
 	if sourceEntry.IsDir() {
 		// dir
-		targetPath = commons.MakeTargetLocalFilePath(sourcePath, targetPath)
+		targetPath = commons.MakeTargetLocalFilePath(sourcePath, targetPath, false)
 		return get.getDir(mdRepoTicket, sourceEntry, targetPath)
 	}
 
 	// file
-	targetPath = commons.MakeTargetLocalFilePath(sourcePath, targetPath)
+	targetPath = commons.MakeTargetLocalFilePath(sourcePath, targetPath, true)
 	return get.getFile(mdRepoTicket, sourceEntry, "", targetPath)
 }
 
@@ -425,6 +425,14 @@ func (get *GetCommand) getFile(mdRepoTicket *commons.MDRepoTicket, sourceEntry *
 }
 
 func (get *GetCommand) getDir(mdRepoTicket *commons.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, targetPath string) error {
+	logger := log.WithFields(log.Fields{
+		"package":  "subcmd",
+		"struct":   "GetCommand",
+		"function": "getDir",
+	})
+
+	logger.Debugf("downloading a directory %q to %q", sourceEntry.Path, targetPath)
+
 	commons.MarkLocalPathMap(get.updatedPathMap, targetPath)
 
 	targetStat, err := os.Stat(targetPath)
@@ -465,7 +473,7 @@ func (get *GetCommand) getDir(mdRepoTicket *commons.MDRepoTicket, sourceEntry *i
 	}
 
 	for _, entry := range entries {
-		newEntryPath := commons.MakeTargetLocalFilePath(entry.Path, targetPath)
+		newEntryPath := commons.MakeTargetLocalFilePath(entry.Path, targetPath, true)
 
 		if entry.IsDir() {
 			// dir

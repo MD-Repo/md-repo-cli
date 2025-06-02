@@ -14,17 +14,17 @@ func TestWebDAV(t *testing.T) {
 }
 
 func testDownloadFileFromWebDAV(t *testing.T) {
-	checksumBytes, _ := hex.DecodeString("d8f0c00cecd46e8efc9fe283228167a2")
+	checksumBytes, _ := hex.DecodeString("713133e1a59ef6d1e42aa5405beae0de")
 	sourceEntry := &irodsclient_fs.Entry{
 		ID:                12345,
-		Path:              "/iplant/home/iychoi/abc.txt",
-		Name:              "abc.txt",
-		Size:              19,
+		Path:              "/iplant/home/iychoi/test_70MB.bin",
+		Name:              "test_70MB.bin",
+		Size:              71680000,
 		CheckSum:          checksumBytes,
 		CheckSumAlgorithm: "MD5",
 	}
 
-	localPath := "/tmp/test.txt"
+	localPath := "/tmp/test_70MB.bin"
 	ticket := "d0h20krj1d295436l270"
 
 	callback := func(progress int64, total int64) {

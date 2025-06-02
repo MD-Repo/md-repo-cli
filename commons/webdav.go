@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/avast/retry-go"
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_common "github.com/cyverse/go-irodsclient/irods/common"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	irodsclient_util "github.com/cyverse/go-irodsclient/irods/util"
+	log "github.com/sirupsen/logrus"
 	"github.com/studio-b12/gowebdav"
 	"golang.org/x/xerrors"
 )
@@ -20,6 +22,11 @@ func GetWebDAVPathForIRODSPath(irodsPath string, ticket string) string {
 }
 
 func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, ticket string, callback irodsclient_common.TrackerCallBack) (*irodsclient_fs.FileTransferResult, error) {
+	logger := log.WithFields(log.Fields{
+		"package":  "commons",
+		"function": "DownloadFileWebDAV",
+	})
+
 	irodsSrcPath := irodsclient_util.GetCorrectIRODSPath(sourceEntry.Path)
 	localDestPath := irodsclient_util.GetCorrectLocalPath(localPath)
 
@@ -61,18 +68,44 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 
 	// download the file
 	webdavPath := GetWebDAVPathForIRODSPath(irodsSrcPath, ticket)
-	streamReader, err := client.ReadStream(webdavPath)
-	if err != nil {
-		return fileTransferResult, xerrors.Errorf("failed to read file %s from WebDAV server: %w", webdavPath, err)
-	}
-	defer streamReader.Close()
 
-	actualWritten, err := downloadToLocalWithTrackerCallBack(streamReader, localFilePath, sourceEntry.Size, callback)
-	if err != nil {
-		return fileTransferResult, xerrors.Errorf("failed to download file %s from WebDAV server: %w", webdavPath, err)
+	offset := int64(0)
+	readSize := sourceEntry.Size
+
+	for offset < sourceEntry.Size {
+		download := func() error {
+			readSize = sourceEntry.Size - offset
+
+			logger.Debugf("downloading file %s (offset %d, length %d) from WebDAV server", webdavPath, offset, readSize)
+
+			reader, readErr := client.ReadStreamRange(webdavPath, offset, readSize)
+			if readErr != nil {
+				return xerrors.Errorf("failed to read stream range of file %s (offset %d, length %d) from WebDAV server: %w", webdavPath, offset, readSize, readErr)
+			}
+			defer reader.Close()
+
+			newOffset, downloadErr := downloadToLocalWithTrackerCallBack(reader, localFilePath, offset, readSize, sourceEntry.Size, callback)
+			if downloadErr != nil {
+				logger.WithError(downloadErr).Debugf("failed to download file %s (offset %d, length %d) from WebDAV server", webdavPath, offset, readSize)
+
+				// if the download failed, we need to update the offset
+				offset = newOffset
+				return xerrors.Errorf("failed to download file %s (offset %d, length %d) from WebDAV server: %w", webdavPath, offset, readSize, downloadErr)
+			}
+
+			offset = newOffset
+			return nil
+		}
+
+		// retry download in case of failure
+		// we retry 3 times with 5 seconds delay between attempts
+		retryErr := retry.Do(download, retry.Attempts(3), retry.Delay(5*time.Second), retry.LastErrorOnly(true))
+		if retryErr != nil {
+			return fileTransferResult, xerrors.Errorf("failed to download file %s (offset %d, length %d) from WebDAV server after 3 attempts: %w", webdavPath, offset, readSize, retryErr)
+		}
 	}
 
-	fileTransferResult.LocalSize = actualWritten
+	fileTransferResult.LocalSize = offset
 
 	localHash, err := calculateLocalFileHash(localPath, sourceEntry.CheckSumAlgorithm)
 	if err != nil {
@@ -101,21 +134,29 @@ func calculateLocalFileHash(localPath string, algorithm irodsclient_types.Checks
 	return hashBytes, nil
 }
 
-func downloadToLocalWithTrackerCallBack(reader io.ReadCloser, localPath string, fileSize int64, callback irodsclient_common.TrackerCallBack) (int64, error) {
-	f, err := os.Create(localPath)
+func downloadToLocalWithTrackerCallBack(reader io.ReadCloser, localPath string, offset int64, readLength int64, fileSize int64, callback irodsclient_common.TrackerCallBack) (int64, error) {
+	f, err := os.OpenFile(localPath, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
-		return 0, xerrors.Errorf("failed to create local file %s: %w", localPath, err)
+		return offset, xerrors.Errorf("failed to open local file %s: %w", localPath, err)
 	}
 	defer f.Close()
 
-	// actual download here
-	if callback != nil {
-		callback(0, fileSize)
+	newOffset, err := f.Seek(offset, io.SeekStart)
+	if err != nil {
+		return offset, xerrors.Errorf("failed to seek to offset %d in local file %s: %w", offset, localPath, err)
 	}
 
-	sizeLeft := fileSize
+	if newOffset != offset {
+		return offset, xerrors.Errorf("failed to seek to offset %d in local file %s, current offset is %d", offset, localPath, newOffset)
+	}
+
+	if callback != nil {
+		callback(offset, fileSize)
+	}
+
+	sizeLeft := readLength
 	actualRead := int64(0)
-	actualWritten := int64(0)
+	actualWrite := int64(0)
 
 	buffer := make([]byte, 64*1024) // 64KB buffer
 	for sizeLeft > 0 {
@@ -127,13 +168,17 @@ func downloadToLocalWithTrackerCallBack(reader io.ReadCloser, localPath string, 
 
 			sizeWritten, writeErr := f.Write(buffer[:sizeRead])
 			if writeErr != nil {
-				return actualWritten, xerrors.Errorf("failed to write to local file %s: %w", localPath, writeErr)
+				return offset + actualWrite, xerrors.Errorf("failed to write to local file %s: %w", localPath, writeErr)
 			}
 
-			actualWritten += int64(sizeWritten)
+			if sizeWritten != sizeRead {
+				return offset + actualWrite, xerrors.Errorf("failed to write all bytes to local file %s, expected %d, got %d", localPath, sizeRead, sizeWritten)
+			}
+
+			actualWrite += int64(sizeWritten)
 
 			if callback != nil {
-				callback(actualRead, fileSize)
+				callback(offset+actualWrite, fileSize)
 			}
 		}
 
@@ -142,13 +187,13 @@ func downloadToLocalWithTrackerCallBack(reader io.ReadCloser, localPath string, 
 				break
 			}
 
-			return actualWritten, xerrors.Errorf("failed to read from reader: %w", err)
+			return offset + actualWrite, xerrors.Errorf("failed to read from reader: %w", err)
 		}
 	}
 
-	if actualWritten != fileSize {
-		return actualWritten, xerrors.Errorf("file size mismatch: expected %d, got %d", fileSize, actualWritten)
+	if actualWrite != readLength {
+		return offset + actualWrite, xerrors.Errorf("file size mismatch: expected %d, got %d", readLength, actualRead)
 	}
 
-	return actualWritten, nil
+	return offset + actualWrite, nil
 }

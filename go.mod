@@ -3,6 +3,7 @@ module github.com/MD-Repo/md-repo-cli
 go 1.22
 
 require (
+	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/creativeprojects/go-selfupdate v1.1.0
 	github.com/cyverse/go-irodsclient v0.17.2
 	github.com/hashicorp/go-multierror v1.1.1

@@ -436,7 +436,8 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 
 	if sourceStat.IsDir() {
 		// dir
-		targetPath = commons.MakeTargetIRODSFilePath(submit.filesystem, sourcePath, targetPath, true)
+		// we don't want to create a subdirectory in the target path
+		//targetPath = commons.MakeTargetIRODSFilePath(submit.filesystem, sourcePath, targetPath, false)
 		return submit.submitDir(sourceStat, sourcePath, targetRootPath, targetPath)
 	}
 

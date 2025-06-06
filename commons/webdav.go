@@ -2,7 +2,9 @@ package commons
 
 import (
 	"bytes"
+	"crypto/tls"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -61,6 +63,44 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 	}
 
 	client := gowebdav.NewClient(mdRepoWebDAVServerURL, "anonymous", "")
+
+	tlsConfig := &tls.Config{
+		CipherSuites: []uint16{
+			// TLS 1.0 - 1.2 cipher suites.
+			tls.TLS_RSA_WITH_RC4_128_SHA,
+			tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+			tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_RSA_WITH_AES_128_CBC_SHA256,
+			tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_ECDHE_RSA_WITH_RC4_128_SHA,
+			tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+			// TLS 1.3 cipher suites.
+			tls.TLS_AES_128_GCM_SHA256,
+			tls.TLS_AES_256_GCM_SHA384,
+			tls.TLS_CHACHA20_POLY1305_SHA256,
+		},
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig: tlsConfig,
+	}
+
+	client.SetTransport(transport)
 	err = client.Connect()
 	if err != nil {
 		return fileTransferResult, xerrors.Errorf("failed to connect to WebDAV server: %w", err)

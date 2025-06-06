@@ -97,7 +97,7 @@ func main() {
 				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\nWrong MD-Repo data server configuration.\n")
 			}
 		} else if irodsclient_types.IsConnectionError(err) {
-			printNetworkError()
+			printIRODSNetworkError()
 		} else if irodsclient_types.IsConnectionPoolFullError(err) {
 			var connectionPoolFullError *irodsclient_types.ConnectionPoolFullError
 			if errors.As(err, &connectionPoolFullError) {
@@ -155,7 +155,12 @@ func main() {
 				commons.PrintErrorf("MD-Repo data server error!\n")
 			}
 		} else if commons.IsDialHTTPError(err) {
-			printNetworkError()
+			var dialHTTPError *commons.DialHTTPError
+			if errors.As(err, &dialHTTPError) {
+				printMDRepoServerNetworkError(dialHTTPError.URL)
+			} else {
+				printMDRepoServerNetworkError("")
+			}
 		} else if commons.IsInvalidTicketError(err) {
 			var invalidTicketError *commons.InvalidTicketError
 			if errors.As(err, &invalidTicketError) {
@@ -221,7 +226,7 @@ func main() {
 	}
 }
 
-func printNetworkError() {
+func printIRODSNetworkError() {
 	commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\n")
 
 	// check if internet works
@@ -241,4 +246,16 @@ func printNetworkError() {
 	commons.Printf("Tested MD-Repo data server access via https://data.cyverse.org - OK.\n")
 
 	commons.PrintErrorf("Verify that your firewall allows access on port 1247 (perhaps request this from network admin)\n")
+}
+
+func printMDRepoServerNetworkError(url string) {
+	commons.PrintErrorf("Failed to establish a HTTP connection to MD-Repo server %s!\n", url)
+
+	// check if internet works
+	_, err := http.Get("https://www.google.com")
+	if err != nil {
+		commons.PrintErrorf("No Internet access.\nCheck internet connectivity.\n")
+		return
+	}
+	commons.Printf("Tested Internet access via www.google.com - OK.\n")
 }

@@ -165,7 +165,7 @@ func (submitls *SubmitListCommand) Process() error {
 }
 
 func (submitls *SubmitListCommand) listOne(sourceRootPath string, sourcePath string) error {
-	connection, err := submitls.filesystem.GetMetadataConnection()
+	connection, err := submitls.filesystem.GetMetadataConnection(true)
 	if err != nil {
 		return xerrors.Errorf("failed to get connection: %w", err)
 	}

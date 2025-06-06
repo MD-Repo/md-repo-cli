@@ -23,7 +23,7 @@ func GetWebDAVPathForIRODSPath(irodsPath string, ticket string) string {
 	return mdRepoWebDAVPrefix + irodsPath + "?ticket=" + ticket
 }
 
-func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, ticket string, callback irodsclient_common.TrackerCallBack) (*irodsclient_fs.FileTransferResult, error) {
+func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, ticket string, callback irodsclient_common.TransferTrackerCallback) (*irodsclient_fs.FileTransferResult, error) {
 	logger := log.WithFields(log.Fields{
 		"package":  "commons",
 		"function": "DownloadFileWebDAV",
@@ -60,6 +60,23 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 
 	if len(sourceEntry.CheckSum) == 0 {
 		return fileTransferResult, xerrors.Errorf("failed to get checksum of the source file for path %q", irodsSrcPath)
+	}
+
+	if sourceEntry.Size == 0 {
+		// zero size file, just create an empty file
+		f, err := os.OpenFile(localPath, os.O_RDWR|os.O_CREATE, 0666)
+		if err != nil {
+			return fileTransferResult, xerrors.Errorf("failed to create a local file %s: %w", localPath, err)
+		}
+		f.Close()
+
+		fileTransferResult.LocalCheckSumAlgorithm = sourceEntry.CheckSumAlgorithm
+		fileTransferResult.LocalCheckSum = sourceEntry.CheckSum
+		fileTransferResult.LocalSize = 0
+
+		fileTransferResult.EndTime = time.Now()
+
+		return fileTransferResult, nil
 	}
 
 	client := gowebdav.NewClient(mdRepoWebDAVServerURL, "anonymous", "")
@@ -174,7 +191,7 @@ func calculateLocalFileHash(localPath string, algorithm irodsclient_types.Checks
 	return hashBytes, nil
 }
 
-func downloadToLocalWithTrackerCallBack(reader io.ReadCloser, localPath string, offset int64, readLength int64, fileSize int64, callback irodsclient_common.TrackerCallBack) (int64, error) {
+func downloadToLocalWithTrackerCallBack(reader io.ReadCloser, localPath string, offset int64, readLength int64, fileSize int64, callback irodsclient_common.TransferTrackerCallback) (int64, error) {
 	f, err := os.OpenFile(localPath, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		return offset, xerrors.Errorf("failed to open local file %s: %w", localPath, err)

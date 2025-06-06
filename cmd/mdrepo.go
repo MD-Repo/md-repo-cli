@@ -92,7 +92,7 @@ func main() {
 		} else if irodsclient_types.IsConnectionConfigError(err) {
 			var connectionConfigError *irodsclient_types.ConnectionConfigError
 			if errors.As(err, &connectionConfigError) {
-				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server (host: %q, port: %d)!\nWrong MD-Repo data server configuration.\n", connectionConfigError.Config.Host, connectionConfigError.Config.Port)
+				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server (host: %q, port: %d)!\nWrong MD-Repo data server configuration.\n", connectionConfigError.Account.Host, connectionConfigError.Account.Port)
 			} else {
 				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\nWrong MD-Repo data server configuration.\n")
 			}

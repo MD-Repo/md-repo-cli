@@ -5,7 +5,7 @@ go 1.22
 require (
 	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/creativeprojects/go-selfupdate v1.1.0
-	github.com/cyverse/go-irodsclient v0.17.2
+	github.com/cyverse/go-irodsclient v0.17.3-0.20250604210423-a900acdb684e
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/jedib0t/go-pretty/v6 v6.6.7
 	github.com/sirupsen/logrus v1.9.3

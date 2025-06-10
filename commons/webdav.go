@@ -3,6 +3,7 @@ package commons
 import (
 	"bytes"
 	"crypto/tls"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -128,7 +129,6 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 
 	offset := int64(0)
 	readSize := sourceEntry.Size
-
 	for offset < sourceEntry.Size {
 		download := func() error {
 			readSize = sourceEntry.Size - offset
@@ -156,9 +156,16 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 
 		// retry download in case of failure
 		// we retry 3 times with 5 seconds delay between attempts
+		offsetLast := offset
 		retryErr := retry.Do(download, retry.Attempts(3), retry.Delay(5*time.Second), retry.LastErrorOnly(true))
 		if retryErr != nil {
-			return fileTransferResult, xerrors.Errorf("failed to download file %s (offset %d, length %d) from WebDAV server after 3 attempts: %w", webdavPath, offset, readSize, retryErr)
+			if errors.Is(retryErr, io.ErrUnexpectedEOF) && offsetLast < offset {
+				// progress was made
+				// continue to retry
+				logger.WithError(retryErr).Debugf("downloaded file %s (offset %d, length %d, data left %d) from WebDAV server, but got unexpected EOF, retrying...", webdavPath, offset, offset-offsetLast, readSize)
+			} else {
+				return fileTransferResult, xerrors.Errorf("failed to download file %s (offset %d, length %d) from WebDAV server after 3 attempts: %w", webdavPath, offset, readSize, retryErr)
+			}
 		}
 	}
 

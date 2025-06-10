@@ -5,6 +5,8 @@ import (
 	"os"
 	"testing"
 
+	log "github.com/sirupsen/logrus"
+
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	"github.com/stretchr/testify/assert"
 )
@@ -25,7 +27,9 @@ func testDownloadFileFromWebDAV(t *testing.T) {
 	}
 
 	localPath := "/tmp/test_70MB.bin"
-	ticket := "d0h20krj1d295436l270"
+	ticket := ""
+
+	log.SetLevel(log.DebugLevel)
 
 	callback := func(progress int64, total int64) {
 		// This is a dummy callback function

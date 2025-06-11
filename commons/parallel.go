@@ -73,6 +73,7 @@ type ParallelJobManager struct {
 	availableThreadWaitCondition *sync.Cond // used for checking available threads
 	scheduleWait                 sync.WaitGroup
 	processWait                  sync.WaitGroup
+	progressBarWait              sync.WaitGroup
 }
 
 // NewParallelJobManager creates a new ParallelJobManager
@@ -91,6 +92,7 @@ func NewParallelJobManager(fs *irodsclient_fs.FileSystem, maxThreads int, showPr
 		mutex:                   sync.RWMutex{},
 		scheduleWait:            sync.WaitGroup{},
 		processWait:             sync.WaitGroup{},
+		progressBarWait:         sync.WaitGroup{},
 
 		jobsScheduledCounter: 0,
 		jobsDoneCounter:      0,
@@ -156,6 +158,8 @@ func (manager *ParallelJobManager) Wait() error {
 	manager.scheduleWait.Wait()
 	logger.Debug("waiting job-wait")
 	manager.processWait.Wait()
+	logger.Debug("waiting progressbar-wait")
+	manager.progressBarWait.Wait()
 
 	manager.mutex.RLock()
 	defer manager.mutex.RUnlock()
@@ -176,6 +180,7 @@ func (manager *ParallelJobManager) startProgress() {
 		manager.progressWriter = GetProgressWriter(true)
 		messageWidth := getProgressMessageWidth(true)
 
+		manager.progressBarWait.Add(1)
 		go manager.progressWriter.Render()
 
 		// add progress tracker callback
@@ -234,6 +239,8 @@ func (manager *ParallelJobManager) endProgress() {
 			manager.mutex.Unlock()
 
 			manager.progressWriter.Stop()
+
+			manager.progressBarWait.Done()
 		}
 	}
 }

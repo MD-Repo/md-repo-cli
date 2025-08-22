@@ -136,7 +136,7 @@ func (submit *SubmitCommand) Process() error {
 		return xerrors.Errorf("failed to input missing fields: %w", err)
 	}
 
-	validSourcePaths, invalidSourcePaths, orcID, err := submit.scanSourcePaths(submit.submissionFlagValues.OrcID)
+	validSourcePaths, invalidSourcePaths, invalidSourcePathsErrors, orcID, err := submit.scanSourcePaths(submit.submissionFlagValues.OrcID)
 	if err != nil {
 		return xerrors.Errorf("failed to scan source paths: %w", err)
 	}
@@ -160,10 +160,14 @@ func (submit *SubmitCommand) Process() error {
 
 			logger.Debugf("the directories ignored due to lack of metadata file:")
 			for sourceIdx, sourcePath := range invalidSourcePaths {
-				logger.Debugf("[%d] %s", sourceIdx+1, sourcePath)
+				if len(invalidSourcePathsErrors) > sourceIdx {
+					logger.Debugf("[%d] %s: %s", sourceIdx+1, sourcePath, invalidSourcePathsErrors[sourceIdx])
+				} else {
+					logger.Debugf("[%d] %s", sourceIdx+1, sourcePath)
+				}
 			}
 
-			return commons.NewSimulationNoNotMatchingError(validSourcePaths, invalidSourcePaths, expectedSimulationNo)
+			return commons.NewSimulationNoNotMatchingError(validSourcePaths, invalidSourcePaths, invalidSourcePathsErrors, expectedSimulationNo)
 		}
 
 		if len(orcID) == 0 {
@@ -326,9 +330,10 @@ func (submit *SubmitCommand) checkValidSourcePath(sourcePath string) error {
 }
 
 // scanSourcePaths scans source paths and return valid sources only
-func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, string, error) {
+func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, []error, string, error) {
 	validSourcePaths := []string{}
 	invalidSourcePaths := []string{}
+	invalidSourcePathsErrors := []error{}
 
 	for _, sourcePath := range submit.sourcePaths {
 		sourcePath = commons.MakeLocalPath(sourcePath)
@@ -336,14 +341,14 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 		st, stErr := os.Stat(sourcePath)
 		if stErr != nil {
 			if os.IsNotExist(stErr) {
-				return nil, nil, "", irodsclient_types.NewFileNotFoundError(sourcePath)
+				return nil, nil, nil, "", irodsclient_types.NewFileNotFoundError(sourcePath)
 			}
 
-			return nil, nil, "", stErr
+			return nil, nil, nil, "", stErr
 		}
 
 		if !st.IsDir() {
-			return nil, nil, "", commons.NewNotDirError(sourcePath)
+			return nil, nil, nil, "", commons.NewNotDirError(sourcePath)
 		}
 
 		err := submit.checkValidSourcePath(sourcePath)
@@ -356,7 +361,7 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 		// may have sub dirs?
 		dirEntries, readErr := os.ReadDir(sourcePath)
 		if readErr != nil {
-			return nil, nil, "", xerrors.Errorf("failed to list source %q: %w", sourcePath, readErr)
+			return nil, nil, nil, "", xerrors.Errorf("failed to list source %q: %w", sourcePath, readErr)
 		}
 
 		hasSubDirs := false
@@ -372,6 +377,7 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 				} else {
 					// invalid
 					invalidSourcePaths = append(invalidSourcePaths, entryPath)
+					invalidSourcePathsErrors = append(invalidSourcePathsErrors, chkErr)
 				}
 			}
 		}
@@ -379,27 +385,27 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 		if !hasSubDirs {
 			// invalid
 			invalidSourcePaths = append(invalidSourcePaths, sourcePath)
+			invalidSourcePathsErrors = append(invalidSourcePathsErrors, err)
 		}
 	}
 
 	// sort source paths by name to match to tickets always in the same order
 	slices.Sort(validSourcePaths)
-	slices.Sort(invalidSourcePaths)
 
 	// if orcID is given, override the orcID
 	if len(orcID) > 0 {
-		return validSourcePaths, invalidSourcePaths, orcID, nil
+		return validSourcePaths, invalidSourcePaths, invalidSourcePathsErrors, orcID, nil
 	}
 
 	orcIDFound := ""
 	for _, validSourcePath := range validSourcePaths {
 		myOrcID, err := commons.ReadOrcIDFromSubmitMetadataFileInDir(validSourcePath)
 		if err != nil {
-			return nil, nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %q: %w", validSourcePath, err)
+			return nil, nil, nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %q: %w", validSourcePath, err)
 		}
 
 		if len(myOrcID) == 0 {
-			return nil, nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %q: %w", validSourcePath, commons.InvalidOrcIDError)
+			return nil, nil, nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %q: %w", validSourcePath, commons.InvalidOrcIDError)
 		}
 
 		if len(orcIDFound) == 0 {
@@ -407,11 +413,11 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 		}
 
 		if orcIDFound != myOrcID {
-			return nil, nil, "", xerrors.Errorf("Lead Contributor's ORC-ID mismatch for %q, expected %s, but got %s: %w", validSourcePath, orcIDFound, myOrcID, commons.InvalidOrcIDError)
+			return nil, nil, nil, "", xerrors.Errorf("Lead Contributor's ORC-ID mismatch for %q, expected %s, but got %s: %w", validSourcePath, orcIDFound, myOrcID, commons.InvalidOrcIDError)
 		}
 	}
 
-	return validSourcePaths, invalidSourcePaths, orcIDFound, nil
+	return validSourcePaths, invalidSourcePaths, invalidSourcePathsErrors, orcIDFound, nil
 }
 
 func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, sourcePath string, targetPath string) error {

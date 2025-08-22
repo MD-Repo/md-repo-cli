@@ -197,7 +197,11 @@ func main() {
 				if len(matchingError.InvalidSimulationPaths) > 0 {
 					commons.PrintErrorf("the directories ignored due to lack of metadata file:\n")
 					for sourceIdx, sourcePath := range matchingError.InvalidSimulationPaths {
-						commons.PrintErrorf("[%d] %s\n", sourceIdx+1, sourcePath)
+						if len(matchingError.InvalidSimulationPathsErrors) > sourceIdx {
+							commons.PrintErrorf("[%d] %s: %s\n", sourceIdx+1, sourcePath, matchingError.InvalidSimulationPathsErrors[sourceIdx])
+						} else {
+							commons.PrintErrorf("[%d] %s\n", sourceIdx+1, sourcePath)
+						}
 					}
 				}
 

@@ -76,17 +76,19 @@ func IsInvalidTicketError(err error) bool {
 }
 
 type SimulationNoNotMatchingError struct {
-	ValidSimulationPaths   []string
-	InvalidSimulationPaths []string
-	Expected               int
+	ValidSimulationPaths         []string
+	InvalidSimulationPaths       []string
+	InvalidSimulationPathsErrors []error
+	Expected                     int
 }
 
 // NewSimulationNoNotMatchingError creates a simulation no not matching error
-func NewSimulationNoNotMatchingError(valid []string, invalid []string, expected int) error {
+func NewSimulationNoNotMatchingError(valid []string, invalid []string, invalidErrors []error, expected int) error {
 	return &SimulationNoNotMatchingError{
-		ValidSimulationPaths:   valid,
-		InvalidSimulationPaths: invalid,
-		Expected:               expected,
+		ValidSimulationPaths:         valid,
+		InvalidSimulationPaths:       invalid,
+		InvalidSimulationPathsErrors: invalidErrors,
+		Expected:                     expected,
 	}
 }
 

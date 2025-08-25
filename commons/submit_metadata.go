@@ -21,8 +21,8 @@ type MDRepoSubmitMetadata struct {
 	LeadContributorORCID    string `toml:"lead_contributor_orcid"`
 	PrimaryContributorORCID string `toml:"primary_contributor_orcid"`
 
-	RequiredFiles   []string `toml:"required_files"`
-	AdditionalFiles []string `toml:"additional_files"`
+	RequiredFiles   map[string]string   `toml:"required_files"`
+	AdditionalFiles []map[string]string `toml:"additional_files"`
 }
 
 type MDRepoVerifySubmitMetadataRequest struct {
@@ -124,19 +124,55 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 
 	var allErrors error
 
-	for _, file := range meta.RequiredFiles {
+	hasTrajectory := false
+	hasStructure := false
+	hasTopology := false
+
+	for filekey, file := range meta.RequiredFiles {
+		if filekey == "trajectory_file_name" {
+			hasTrajectory = true
+		}
+		if filekey == "structure_file_name" {
+			hasStructure = true
+		}
+		if filekey == "topology_file_name" {
+			hasTopology = true
+		}
+
 		if !meta.hasLocalFile(file) {
-			errObj := xerrors.Errorf("required file %q not found: %w", filepath.Join(meta.SubmissionPath, file), InvalidSubmitMetadataError)
+			errObj := xerrors.Errorf("required file %q - %q not found: %w", filekey, filepath.Join(meta.SubmissionPath, file), InvalidSubmitMetadataError)
 			logger.Error(errObj)
 			allErrors = multierror.Append(allErrors, errObj)
 		}
 	}
 
-	for _, file := range meta.AdditionalFiles {
-		if !meta.hasLocalFile(file) {
-			errObj := xerrors.Errorf("additional file %q not found: %w", filepath.Join(meta.SubmissionPath, file), InvalidSubmitMetadataError)
-			logger.Error(errObj)
-			allErrors = multierror.Append(allErrors, errObj)
+	if !hasTrajectory {
+		errObj := xerrors.Errorf("field 'trajectory_file_name' not found: %w", InvalidSubmitMetadataError)
+		logger.Error(errObj)
+		allErrors = multierror.Append(allErrors, errObj)
+	}
+
+	if !hasStructure {
+		errObj := xerrors.Errorf("field 'structure_file_name' not found: %w", InvalidSubmitMetadataError)
+		logger.Error(errObj)
+		allErrors = multierror.Append(allErrors, errObj)
+	}
+
+	if !hasTopology {
+		errObj := xerrors.Errorf("field 'topology_file_name' not found: %w", InvalidSubmitMetadataError)
+		logger.Error(errObj)
+		allErrors = multierror.Append(allErrors, errObj)
+	}
+
+	for _, additionalFile := range meta.AdditionalFiles {
+		for filekey, file := range additionalFile {
+			if filekey == "additional_file_name" {
+				if !meta.hasLocalFile(file) {
+					errObj := xerrors.Errorf("additional file %q - %q not found: %w", filekey, filepath.Join(meta.SubmissionPath, file), InvalidSubmitMetadataError)
+					logger.Error(errObj)
+					allErrors = multierror.Append(allErrors, errObj)
+				}
+			}
 		}
 	}
 
@@ -149,8 +185,17 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 
 func (meta *MDRepoSubmitMetadata) GetFiles() []string {
 	var files []string
-	files = append(files, meta.RequiredFiles...)
-	files = append(files, meta.AdditionalFiles...)
+	for _, v := range meta.RequiredFiles {
+		files = append(files, v)
+	}
+
+	for _, additionalFile := range meta.AdditionalFiles {
+		for k, v := range additionalFile {
+			if k == "additional_file_name" {
+				files = append(files, v)
+			}
+		}
+	}
 	return files
 }
 

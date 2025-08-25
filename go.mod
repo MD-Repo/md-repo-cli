@@ -5,6 +5,7 @@ go 1.23.0
 toolchain go1.24.2
 
 require (
+	github.com/BurntSushi/toml v1.5.0
 	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/creativeprojects/go-selfupdate v1.5.0
 	github.com/cyverse/go-irodsclient v0.17.3-0.20250604210423-a900acdb684e

@@ -69,7 +69,10 @@ func testReadSubmitMetadata(t *testing.T) {
 	doi = "10.1073/pnas.1119174109"
 `
 
-	orcid, err := ReadOrcIDFromSubmitMetadataString(metadata)
+	submitMetadata, err := ParseSubmitMetadataString(metadata)
+	assert.NoError(t, err)
+
+	orcid, err := submitMetadata.GetOrcID()
 	assert.NoError(t, err)
 
 	assert.Equal(t, "0000-0002-9100-4108", orcid)

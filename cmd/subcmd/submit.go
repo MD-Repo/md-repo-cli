@@ -199,8 +199,21 @@ func (submit *SubmitCommand) Process() error {
 		return commons.TokenNotProvidedError
 	}
 
-	// verify metadatas
-	invalidErr := commons.VerifySubmitMetadata(validSourcePaths, submit.tokenFlagValues.ServiceURL, config.Token)
+	// verify metadata first
+	for _, sourcePath := range validSourcePaths {
+		metadata, err := commons.ParseSubmitMetadataDir(sourcePath)
+		if err != nil {
+			return xerrors.Errorf("failed to parse submit metadata in dir %q: %w", sourcePath, err)
+		}
+
+		err = metadata.ValidateFiles()
+		if err != nil {
+			return xerrors.Errorf("failed to validate local files listed in the metadata file %q: %w", metadata.MetadataFilePath, err)
+		}
+	}
+
+	// verify metadata via server
+	invalidErr := commons.VerifySubmitMetadataViaServer(validSourcePaths, submit.tokenFlagValues.ServiceURL, config.Token)
 	if invalidErr != nil {
 		return invalidErr
 	} else {
@@ -399,7 +412,13 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 
 	orcIDFound := ""
 	for _, validSourcePath := range validSourcePaths {
-		myOrcID, err := commons.ReadOrcIDFromSubmitMetadataFileInDir(validSourcePath)
+		metadataPath := commons.GetSubmitMetadataPath(validSourcePath)
+		submitMetadata, err := commons.ParseSubmitMetadataFile(metadataPath)
+		if err != nil {
+			return nil, nil, nil, "", xerrors.Errorf("failed to parse metadata for %q: %w", validSourcePath, err)
+		}
+
+		myOrcID, err := submitMetadata.GetOrcID()
 		if err != nil {
 			return nil, nil, nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %q: %w", validSourcePath, err)
 		}
@@ -440,16 +459,32 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 
 	targetRootPath := targetPath
 
-	if sourceStat.IsDir() {
-		// dir
-		// we don't want to create a subdirectory in the target path
-		//targetPath = commons.MakeTargetIRODSFilePath(submit.filesystem, sourcePath, targetPath, false)
-		return submit.submitDir(sourceStat, sourcePath, targetRootPath, targetPath)
+	if !sourceStat.IsDir() {
+		// file is provided
+		return xerrors.New("source path must be a directory")
 	}
 
-	// file
-	targetPath = commons.MakeTargetIRODSFilePath(submit.filesystem, sourcePath, targetPath, true)
-	return submit.submitFile(sourceStat, sourcePath, targetRootPath, targetPath)
+	// dir
+	metadata, err := commons.ParseSubmitMetadataDir(sourcePath)
+	if err != nil {
+		return xerrors.Errorf("failed to parse submit metadata in dir %q: %w", sourcePath, err)
+	}
+
+	sourceFiles := metadata.GetFiles()
+	for _, sourceFile := range sourceFiles {
+		sourceFileAbsPath := filepath.Join(metadata.SubmissionPath, sourceFile)
+		sourceFileStat, err := os.Stat(sourceFileAbsPath)
+		if err != nil {
+			return xerrors.Errorf("failed to stat source file %q: %w", sourceFileAbsPath, err)
+		}
+
+		submitErr := submit.submitFile(sourceFileStat, sourceFileAbsPath, targetRootPath, targetPath)
+		if submitErr != nil {
+			return submitErr
+		}
+	}
+
+	return nil
 }
 
 func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath string, targetRootPath string, targetPath string) error {
@@ -620,78 +655,6 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 
 	// schedule
 	return submit.scheduleSubmit(sourceStat, sourcePath, targetRootPath, targetPath)
-}
-
-func (submit *SubmitCommand) submitDir(sourceStat fs.FileInfo, sourcePath string, targetRootPath string, targetPath string) error {
-	commons.MarkIRODSPathMap(submit.updatedPathMap, targetPath)
-
-	targetEntry, err := submit.filesystem.Stat(targetPath)
-	if err != nil {
-		if irodsclient_types.IsFileNotFoundError(err) {
-			// target does not exist
-			// target must be a directory with new name
-			err = submit.filesystem.MakeDir(targetPath, true)
-			if err != nil {
-				return xerrors.Errorf("failed to make a collection %q: %w", targetPath, err)
-			}
-
-			now := time.Now()
-			reportFile := &commons.TransferReportFile{
-				Method:     commons.TransferMethodPut,
-				StartAt:    now,
-				EndAt:      now,
-				SourcePath: sourcePath,
-				DestPath:   targetPath,
-				Notes:      []string{"directory"},
-			}
-
-			submit.transferReportManager.AddFile(reportFile)
-		} else {
-			return xerrors.Errorf("failed to stat %q: %w", targetPath, err)
-		}
-	} else {
-		// target exists
-		if !targetEntry.IsDir() {
-			return commons.NewNotDirError(targetPath)
-		}
-	}
-
-	// get entries
-	entries, err := os.ReadDir(sourcePath)
-	if err != nil {
-		return xerrors.Errorf("failed to list a directory %q: %w", sourcePath, err)
-	}
-
-	for _, entry := range entries {
-		newEntryPath := commons.MakeTargetIRODSFilePath(submit.filesystem, entry.Name(), targetPath, true)
-
-		entryPath := filepath.Join(sourcePath, entry.Name())
-
-		entryStat, err := os.Stat(entryPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return irodsclient_types.NewFileNotFoundError(entryPath)
-			}
-
-			return xerrors.Errorf("failed to stat %q: %w", entryPath, err)
-		}
-
-		if entryStat.IsDir() {
-			// dir
-			err = submit.submitDir(entryStat, entryPath, targetRootPath, newEntryPath)
-			if err != nil {
-				return err
-			}
-		} else {
-			// file
-			err = submit.submitFile(entryStat, entryPath, targetRootPath, newEntryPath)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
 }
 
 func (submit *SubmitCommand) calculateThreadForTransferJob(size int64) int {

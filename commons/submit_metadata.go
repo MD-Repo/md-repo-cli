@@ -8,18 +8,30 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/hashicorp/go-multierror"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/xerrors"
 )
 
-type MDRepoVarifySubmitMetadataRequest struct {
+type MDRepoSubmitMetadata struct {
+	MetadataFilePath string `toml:"-"`
+	SubmissionPath   string `toml:"-"`
+
+	LeadContributorORCID    string `toml:"lead_contributor_orcid"`
+	PrimaryContributorORCID string `toml:"primary_contributor_orcid"`
+
+	RequiredFiles   []string `toml:"required_files"`
+	AdditionalFiles []string `toml:"additional_files"`
+}
+
+type MDRepoVerifySubmitMetadataRequest struct {
 	LocalDataDirPath string `json:"directory"`
 	MetadataTOML     string `json:"toml"`
 	Token            string `json:"token"`
 }
 
-type MDRepoVarifySubmitMetadataResponse struct {
+type MDRepoVerifySubmitMetadataResponse struct {
 	LocalDataDirPath string   `json:"directory"`
 	Valid            bool     `json:"valid"`
 	Errors           []string `json:"errors"`
@@ -42,40 +54,110 @@ func HasSubmitMetadataInDir(dirPath string) bool {
 	return false
 }
 
-func ReadOrcIDFromSubmitMetadataString(metadataString string) (string, error) {
-	// we will not use toml parsers as they are not stable
-	metadataLines := strings.Split(metadataString, "\n")
-	for _, metadataLine := range metadataLines {
-		metadataKV := strings.Split(metadataLine, "=")
-		if len(metadataKV) == 2 {
-			key := strings.ToLower(strings.TrimSpace(metadataKV[0]))
-			if key == "lead_contributor_orcid" || key == "primary_contributor_orcid" {
-				return strings.Trim(strings.TrimSpace(metadataKV[1]), "\"'"), nil
-			}
+func ParseSubmitMetadataFile(filePath string) (*MDRepoSubmitMetadata, error) {
+	metadata := MDRepoSubmitMetadata{
+		MetadataFilePath: filePath,
+		SubmissionPath:   filepath.Dir(filePath),
+	}
+
+	_, err := toml.DecodeFile(filePath, &metadata)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to parse submission metadata at %q: %w", filePath, err)
+	}
+
+	return &metadata, nil
+}
+
+func ParseSubmitMetadataDir(dirPath string) (*MDRepoSubmitMetadata, error) {
+	metadata := MDRepoSubmitMetadata{
+		MetadataFilePath: filepath.Join(dirPath, SubmissionMetadataFilename),
+		SubmissionPath:   dirPath,
+	}
+
+	_, err := toml.DecodeFile(metadata.MetadataFilePath, &metadata)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to parse submission metadata at %q: %w", metadata.MetadataFilePath, err)
+	}
+
+	return &metadata, nil
+}
+
+func ParseSubmitMetadataString(metadataString string) (*MDRepoSubmitMetadata, error) {
+	metadata := MDRepoSubmitMetadata{
+		MetadataFilePath: "",
+		SubmissionPath:   "",
+	}
+
+	_, err := toml.Decode(metadataString, &metadata)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to parse submission metadata: %w", err)
+	}
+
+	return &metadata, nil
+}
+
+func (meta *MDRepoSubmitMetadata) GetOrcID() (string, error) {
+	if len(meta.LeadContributorORCID) > 0 {
+		return meta.LeadContributorORCID, nil
+	}
+	if len(meta.PrimaryContributorORCID) > 0 {
+		return meta.PrimaryContributorORCID, nil
+	}
+	return "", xerrors.Errorf("no ORCID found")
+}
+
+func (meta *MDRepoSubmitMetadata) hasLocalFile(filePath string) bool {
+	st, err := os.Stat(filePath)
+	if err == nil {
+		return !st.IsDir()
+	}
+
+	return !os.IsNotExist(err)
+}
+
+func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
+	logger := log.WithFields(log.Fields{
+		"package":  "commons",
+		"struct":   "MDRepoSubmitMetadata",
+		"function": "ValidateFiles",
+	})
+
+	var allErrors error
+
+	for _, file := range meta.RequiredFiles {
+		if !meta.hasLocalFile(file) {
+			errObj := xerrors.Errorf("required file %q not found: %w", filepath.Join(meta.SubmissionPath, file), InvalidSubmitMetadataError)
+			logger.Error(errObj)
+			allErrors = multierror.Append(allErrors, errObj)
 		}
 	}
 
-	return "", xerrors.Errorf("unable to find 'lead_contributor_orcid' node")
-}
-
-func ReadOrcIDFromSubmitMetadataFile(filePath string) (string, error) {
-	metadataBytes, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", xerrors.Errorf("failed to read submission metadata at %q: %w", filePath, err)
+	for _, file := range meta.AdditionalFiles {
+		if !meta.hasLocalFile(file) {
+			errObj := xerrors.Errorf("additional file %q not found: %w", filepath.Join(meta.SubmissionPath, file), InvalidSubmitMetadataError)
+			logger.Error(errObj)
+			allErrors = multierror.Append(allErrors, errObj)
+		}
 	}
 
-	return ReadOrcIDFromSubmitMetadataString(string(metadataBytes))
+	if allErrors != nil {
+		return xerrors.Errorf("failed to validate required and additional files listed in submission metadata: %w", allErrors)
+	}
+
+	return nil
 }
 
-func ReadOrcIDFromSubmitMetadataFileInDir(dirPath string) (string, error) {
-	metadataPath := GetSubmitMetadataPath(dirPath)
-	return ReadOrcIDFromSubmitMetadataFile(metadataPath)
+func (meta *MDRepoSubmitMetadata) GetFiles() []string {
+	var files []string
+	files = append(files, meta.RequiredFiles...)
+	files = append(files, meta.AdditionalFiles...)
+	return files
 }
 
-func VerifySubmitMetadata(sourcePaths []string, serviceURL string, token string) error {
+func VerifySubmitMetadataViaServer(sourcePaths []string, serviceURL string, token string) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "commons",
-		"function": "VerifySubmitMetadata",
+		"function": "VerifySubmitMetadataViaServer",
 	})
 
 	apiURL := mdRepoURL + mdRepoVerifyMetadataApi
@@ -94,7 +176,7 @@ func VerifySubmitMetadata(sourcePaths []string, serviceURL string, token string)
 		return xerrors.Errorf("failed to create a new request to verify submit metadata: %w", err)
 	}
 
-	verifyRequests := []MDRepoVarifySubmitMetadataRequest{}
+	verifyRequests := []MDRepoVerifySubmitMetadataRequest{}
 	for _, sourcePath := range sourcePaths {
 		metadataPath := filepath.Join(sourcePath, SubmissionMetadataFilename)
 		metadataBytes, err := os.ReadFile(metadataPath)
@@ -102,7 +184,7 @@ func VerifySubmitMetadata(sourcePaths []string, serviceURL string, token string)
 			return xerrors.Errorf("failed to read submit metadata %q: %w", metadataPath, err)
 		}
 
-		verifyRequest := MDRepoVarifySubmitMetadataRequest{
+		verifyRequest := MDRepoVerifySubmitMetadataRequest{
 			LocalDataDirPath: sourcePath,
 			MetadataTOML:     string(metadataBytes),
 			Token:            token,
@@ -146,7 +228,7 @@ func VerifySubmitMetadata(sourcePaths []string, serviceURL string, token string)
 		return xerrors.Errorf("failed to verify submit metadata, read failed: %w", err)
 	}
 
-	verifyResponses := []MDRepoVarifySubmitMetadataResponse{}
+	verifyResponses := []MDRepoVerifySubmitMetadataResponse{}
 	err = json.Unmarshal(verifyResponseBytes, &verifyResponses)
 	if err != nil {
 		return xerrors.Errorf("failed to unmarshal submit metadata verify response from JSON: %w", err)
@@ -156,7 +238,7 @@ func VerifySubmitMetadata(sourcePaths []string, serviceURL string, token string)
 	valid := true
 	for _, verifyResponse := range verifyResponses {
 		if !verifyResponse.Valid {
-			if verifyResponse.Errors != nil && len(verifyResponse.Errors) > 0 {
+			if len(verifyResponse.Errors) > 0 {
 				// error
 				for _, verifyRespnseError := range verifyResponse.Errors {
 					verifyErrorObj := xerrors.Errorf("%s, path %q: %w", verifyRespnseError, verifyResponse.LocalDataDirPath, InvalidSubmitMetadataError)

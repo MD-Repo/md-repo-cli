@@ -55,8 +55,27 @@ func testReadSubmitMetadata(t *testing.T) {
 	
 	# A list of ligands involved in the simulation.
 	[[ligands]]
-	
-	
+
+	[required_files]
+	trajectory_file_name = "output.filtered.xtc"
+	structure_file_name = "filtered.pdb"
+	topology_file_name = "structure.prmtop"
+
+	[[additional_files]]
+	additional_file_type = "Input"
+	additional_file_name = "i1"
+	additional_file_description = "i1_desc"
+
+	[[additional_files]]
+	additional_file_type = "Input"
+	additional_file_name = "i2"
+	additional_file_description = "i2_desc"
+
+	[[additional_files]]
+	additional_file_type = "Trajectory"
+	additional_file_name = "t1"
+	additional_file_description = "t1_desc"
+
 	# A list of papers associated with a simulation. Add another [[papers]] block to add another paper.
 	[[papers]]
 	title = "Long-distance correlations of rhinovirus capsid dynamics contribute to uncoating and antiviral activity"
@@ -76,4 +95,14 @@ func testReadSubmitMetadata(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equal(t, "0000-0002-9100-4108", orcid)
+
+	files := submitMetadata.GetFiles()
+	assert.Equal(t, 6, len(files))
+
+	assert.Contains(t, files, "output.filtered.xtc")
+	assert.Contains(t, files, "filtered.pdb")
+	assert.Contains(t, files, "structure.prmtop")
+	assert.Contains(t, files, "i1")
+	assert.Contains(t, files, "i2")
+	assert.Contains(t, files, "t1")
 }

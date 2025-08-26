@@ -280,6 +280,8 @@ func (manager *ParallelJobManager) Start() {
 						logger.Debugf("waiting for other jobs to complete - current %d, max %d", currentThreads, manager.maxThreads)
 
 						manager.availableThreadWaitCondition.Wait()
+
+						logger.Debugf("waking up from waiting - current %d, max %d", currentThreads, manager.maxThreads)
 					}
 				}
 

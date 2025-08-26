@@ -468,6 +468,10 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 	}
 
 	sourceFiles := metadata.GetFiles()
+
+	// include submission metadata file itself
+	sourceFiles = append(sourceFiles, commons.SubmissionMetadataFilename)
+
 	for _, sourceFile := range sourceFiles {
 		sourceFileAbsPath := filepath.Join(metadata.SubmissionPath, sourceFile)
 		sourceFileStat, err := os.Stat(sourceFileAbsPath)

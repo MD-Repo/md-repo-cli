@@ -18,8 +18,7 @@ type MDRepoSubmitMetadata struct {
 	MetadataFilePath string `toml:"-"`
 	SubmissionPath   string `toml:"-"`
 
-	LeadContributorORCID    string `toml:"lead_contributor_orcid"`
-	PrimaryContributorORCID string `toml:"primary_contributor_orcid"`
+	Initial map[string]interface{} `toml:"initial"`
 
 	RequiredFiles   map[string]string   `toml:"required_files"`
 	AdditionalFiles []map[string]string `toml:"additional_files"`
@@ -97,12 +96,14 @@ func ParseSubmitMetadataString(metadataString string) (*MDRepoSubmitMetadata, er
 }
 
 func (meta *MDRepoSubmitMetadata) GetOrcID() (string, error) {
-	if len(meta.LeadContributorORCID) > 0 {
-		return meta.LeadContributorORCID, nil
+	if leadContributorOrcID, ok := meta.Initial["lead_contributor_orcid"]; ok {
+		return leadContributorOrcID.(string), nil
 	}
-	if len(meta.PrimaryContributorORCID) > 0 {
-		return meta.PrimaryContributorORCID, nil
+
+	if primaryContributorOrcID, ok := meta.Initial["primary_contributor_orcid"]; ok {
+		return string(primaryContributorOrcID.(string)), nil
 	}
+
 	return "", xerrors.Errorf("no ORCID found")
 }
 

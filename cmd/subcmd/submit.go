@@ -423,10 +423,6 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 			return nil, nil, nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %q: %w", validSourcePath, err)
 		}
 
-		if len(myOrcID) == 0 {
-			return nil, nil, nil, "", xerrors.Errorf("failed to read ORC-ID from metadata for %q: %w", validSourcePath, commons.InvalidOrcIDError)
-		}
-
 		if len(orcIDFound) == 0 {
 			orcIDFound = myOrcID
 		}

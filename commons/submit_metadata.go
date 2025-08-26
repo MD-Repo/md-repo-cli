@@ -140,8 +140,10 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 			hasTopology = true
 		}
 
-		if !meta.hasLocalFile(file) {
-			errObj := xerrors.Errorf("required file %q - %q not found: %w", filekey, filepath.Join(meta.SubmissionPath, file), InvalidSubmitMetadataError)
+		absFilepath := filepath.Join(meta.SubmissionPath, file)
+
+		if !meta.hasLocalFile(absFilepath) {
+			errObj := xerrors.Errorf("required file %q - %q not found: %w", filekey, absFilepath, InvalidSubmitMetadataError)
 			logger.Error(errObj)
 			allErrors = multierror.Append(allErrors, errObj)
 		}
@@ -168,8 +170,10 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 	for _, additionalFile := range meta.AdditionalFiles {
 		for filekey, file := range additionalFile {
 			if filekey == "additional_file_name" {
-				if !meta.hasLocalFile(file) {
-					errObj := xerrors.Errorf("additional file %q - %q not found: %w", filekey, filepath.Join(meta.SubmissionPath, file), InvalidSubmitMetadataError)
+				absFilepath := filepath.Join(meta.SubmissionPath, file)
+
+				if !meta.hasLocalFile(absFilepath) {
+					errObj := xerrors.Errorf("additional file %q - %q not found: %w", filekey, absFilepath, InvalidSubmitMetadataError)
 					logger.Error(errObj)
 					allErrors = multierror.Append(allErrors, errObj)
 				}

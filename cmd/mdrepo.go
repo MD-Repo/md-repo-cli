@@ -218,9 +218,9 @@ func main() {
 		} else if commons.IsNotFileError(err) {
 			var notFileError *commons.NotFileError
 			if errors.As(err, &notFileError) {
-				commons.PrintErrorf("Destination %q is not a file!\n", notFileError.Path)
+				commons.PrintErrorf("Path %q is not a file!\n", notFileError.Path)
 			} else {
-				commons.PrintErrorf("Destination is not a file!\n")
+				commons.PrintErrorf("Path is not a file!\n")
 			}
 		} else {
 			commons.PrintErrorf("Unexpected error!\nError Trace:\n  - %+v\n", err)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -474,7 +475,9 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 			return xerrors.Errorf("failed to stat source file %q: %w", sourceFileAbsPath, err)
 		}
 
-		submitErr := submit.submitFile(sourceFileStat, sourceFileAbsPath, targetRootPath, targetPath)
+		targetFilePath := path.Join(targetRootPath, sourceFile)
+
+		submitErr := submit.submitFile(sourceFileStat, sourceFileAbsPath, targetRootPath, targetFilePath)
 		if submitErr != nil {
 			return submitErr
 		}

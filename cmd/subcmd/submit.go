@@ -248,8 +248,11 @@ func (submit *SubmitCommand) Process() error {
 	}
 
 	for ticketIdx, mdRepoTicket := range mdRepoTickets {
+		// process each ticket
 		sourcePath := validSourcePaths[ticketIdx]
 		targetPath := commons.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
+
+		logger.Debugf("submitting %q to %q", sourcePath, targetPath)
 
 		// we create filesystem, job manager for every ticket as they require separate auth
 		// Create a file system
@@ -262,7 +265,6 @@ func (submit *SubmitCommand) Process() error {
 		if err != nil {
 			return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
 		}
-		defer submit.filesystem.Release()
 
 		// parallel job manager
 		submit.parallelJobManager = commons.NewParallelJobManager(submit.filesystem, submit.parallelTransferFlagValues.ThreadNumber, !submit.progressFlagValues.NoProgress, submit.progressFlagValues.ShowFullPath)
@@ -277,6 +279,8 @@ func (submit *SubmitCommand) Process() error {
 		if err != nil {
 			submit.submitStatusFile.SetErrored()
 			submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
+			submit.filesystem.Release()
+			submit.filesystem = nil
 			return xerrors.Errorf("failed to submit %q to %q: %w", sourcePath, targetPath, err)
 		}
 
@@ -284,6 +288,8 @@ func (submit *SubmitCommand) Process() error {
 		submit.submitStatusFile.SetInProgress()
 		err = submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
 		if err != nil {
+			submit.filesystem.Release()
+			submit.filesystem = nil
 			return xerrors.Errorf("failed to create status file on %q: %w", targetPath, err)
 		}
 
@@ -294,6 +300,8 @@ func (submit *SubmitCommand) Process() error {
 		if err != nil {
 			submit.submitStatusFile.SetErrored()
 			submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
+			submit.filesystem.Release()
+			submit.filesystem = nil
 			return xerrors.Errorf("failed to perform parallel jobs: %w", err)
 		}
 
@@ -301,8 +309,18 @@ func (submit *SubmitCommand) Process() error {
 		submit.submitStatusFile.SetCompleted()
 		err = submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
 		if err != nil {
+			submit.filesystem.Release()
+			submit.filesystem = nil
 			return xerrors.Errorf("failed to create status file on %q: %w", targetPath, err)
 		}
+
+		// done
+		logger.Debugf("submitted %q to %q", sourcePath, targetPath)
+
+		submit.parallelJobManager = nil
+
+		submit.filesystem.Release()
+		submit.filesystem = nil
 	}
 
 	return nil

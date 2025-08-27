@@ -222,8 +222,18 @@ func (manager *ParallelJobManager) startProgress() {
 }
 
 func (manager *ParallelJobManager) endProgress() {
+	logger := log.WithFields(log.Fields{
+		"package":  "commons",
+		"struct":   "ParallelJobManager",
+		"function": "endProgress",
+	})
+
+	logger.Debugf("ending progress")
+
 	if manager.showProgress {
 		if manager.progressWriter != nil {
+			logger.Debugf("stopping all active progress")
+
 			manager.mutex.Lock()
 
 			for _, tracker := range manager.progressTrackers {
@@ -263,6 +273,7 @@ func (manager *ParallelJobManager) Start() {
 		currentThreads := 0
 
 		for job := range manager.pendingJobs {
+			logger.Debugf("processing job %d, %q", job.index, job.name)
 			cont := true
 
 			manager.mutex.RLock()

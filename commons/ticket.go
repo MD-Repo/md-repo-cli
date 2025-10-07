@@ -56,7 +56,7 @@ func GetMDRepoTicketFromString(ticketString string) (MDRepoTicket, error) {
 }
 
 func GetMDRepoSimulationRelPath(irodsPath string) (string, error) {
-	start := strings.LastIndex(irodsPath, "/MDR_")
+	start := strings.LastIndex(irodsPath, "/MDR")
 	if start >= 0 {
 		return irodsPath[start+1:], nil
 	}

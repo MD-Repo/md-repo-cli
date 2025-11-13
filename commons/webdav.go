@@ -24,6 +24,25 @@ func GetWebDAVPathForIRODSPath(irodsPath string, ticket string) string {
 	return mdRepoWebDAVPrefix + irodsPath + "?ticket=" + ticket
 }
 
+func GetWebDAVErrorCode(err error) (int, bool) {
+	if pe, ok := err.(*os.PathError); ok {
+		if se, ok2 := pe.Err.(gowebdav.StatusError); ok2 {
+			return se.Status, true
+		}
+	}
+	return 0, false
+}
+
+func GetWebDavError(url string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errorCode, ok := GetWebDAVErrorCode(err); ok {
+		return NewWebDAVError(url, errorCode)
+	}
+	return err
+}
+
 func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, ticket string, callback irodsclient_common.TransferTrackerCallback) (*irodsclient_fs.FileTransferResult, error) {
 	logger := log.WithFields(log.Fields{
 		"package":  "commons",
@@ -121,7 +140,11 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 	client.SetTransport(transport)
 	err = client.Connect()
 	if err != nil {
-		return fileTransferResult, xerrors.Errorf("failed to connect to WebDAV server: %w", err)
+		if httpStatusErr, ok := GetWebDAVErrorCode(err); ok {
+			return fileTransferResult, NewWebDAVError(mdRepoWebDAVServerURL, int(httpStatusErr))
+		}
+
+		return fileTransferResult, NewWebDAVError(mdRepoWebDAVServerURL, http.StatusServiceUnavailable)
 	}
 
 	// download the file
@@ -137,7 +160,8 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 
 			reader, readErr := client.ReadStreamRange(webdavPath, offset, readSize)
 			if readErr != nil {
-				return xerrors.Errorf("failed to read stream range of file %s (offset %d, length %d) from WebDAV server: %w", webdavPath, offset, readSize, readErr)
+				baseErr := GetWebDavError(mdRepoWebDAVServerURL+webdavPath, readErr)
+				return xerrors.Errorf("failed to read stream range of file %s (offset %d, length %d) from WebDAV server: %w", webdavPath, offset, readSize, baseErr)
 			}
 			defer reader.Close()
 

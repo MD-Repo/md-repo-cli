@@ -161,6 +161,13 @@ func main() {
 			} else {
 				printMDRepoServerNetworkError("")
 			}
+		} else if commons.IsWebDAVError(err) {
+			var webDAVError *commons.WebDAVError
+			if errors.As(err, &webDAVError) {
+				printWebdavError(webDAVError.URL, webDAVError.ErrorCode)
+			} else {
+				printWebdavError("", 0)
+			}
 		} else if commons.IsInvalidTicketError(err) {
 			var invalidTicketError *commons.InvalidTicketError
 			if errors.As(err, &invalidTicketError) {
@@ -262,4 +269,20 @@ func printMDRepoServerNetworkError(url string) {
 		return
 	}
 	commons.Printf("Tested Internet access via www.google.com - OK.\n")
+}
+
+func printWebdavError(url string, errorCode int) {
+	if url == "" || errorCode == 0 {
+		commons.PrintErrorf("Failed to access MD-Repo server via WebDAV protocol.\n")
+		return
+	}
+
+	commons.PrintErrorf("Failed to access MD-Repo server %q via WebDAV protocol (error code: %d).\n", url, errorCode)
+
+	if errorCode == http.StatusForbidden {
+		commons.PrintErrorf("Your MD-Repo server access might be blocked.\n")
+
+		commons.PrintErrorf("Your IP address might be blocked.\nVisit 'https://unblockme.cyverse.org' to unblock your IP address.\nPlease contact us at 'help@mdrepo.org' if it did not help.\n")
+		return
+	}
 }

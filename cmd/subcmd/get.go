@@ -289,7 +289,7 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *commons.MDRepoTicket, sourceEnt
 		manager := job.GetManager()
 		fs := manager.GetFilesystem()
 
-		callbackGet := func(processed int64, total int64) {
+		callbackGet := func(taskName string, processed int64, total int64) {
 			job.Progress(processed, total, false)
 		}
 
@@ -387,7 +387,7 @@ func (get *GetCommand) getFile(mdRepoTicket *commons.MDRepoTicket, sourceEntry *
 		if targetStat.Size() == sourceEntry.Size {
 			// compare hash
 			if len(sourceEntry.CheckSum) > 0 {
-				localChecksum, err := irodsclient_util.HashLocalFile(targetPath, string(sourceEntry.CheckSumAlgorithm))
+				localChecksum, err := irodsclient_util.HashLocalFile(targetPath, string(sourceEntry.CheckSumAlgorithm), nil)
 				if err != nil {
 					return xerrors.Errorf("failed to get hash of %q: %w", targetPath, err)
 				}

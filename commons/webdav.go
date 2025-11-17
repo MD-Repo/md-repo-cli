@@ -214,7 +214,7 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 
 func calculateLocalFileHash(localPath string, algorithm irodsclient_types.ChecksumAlgorithm) ([]byte, error) {
 	// verify checksum
-	hashBytes, err := irodsclient_util.HashLocalFile(localPath, string(algorithm))
+	hashBytes, err := irodsclient_util.HashLocalFile(localPath, string(algorithm), nil)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to get %q hash of %q: %w", algorithm, localPath, err)
 	}
@@ -239,7 +239,7 @@ func downloadToLocalWithTrackerCallBack(reader io.ReadCloser, localPath string, 
 	}
 
 	if callback != nil {
-		callback(offset, fileSize)
+		callback("download", offset, fileSize)
 	}
 
 	sizeLeft := readLength
@@ -266,7 +266,7 @@ func downloadToLocalWithTrackerCallBack(reader io.ReadCloser, localPath string, 
 			actualWrite += int64(sizeWritten)
 
 			if callback != nil {
-				callback(offset+actualWrite, fileSize)
+				callback("download", offset+actualWrite, fileSize)
 			}
 		}
 

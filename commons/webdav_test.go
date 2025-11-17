@@ -31,7 +31,7 @@ func testDownloadFileFromWebDAV(t *testing.T) {
 
 	log.SetLevel(log.DebugLevel)
 
-	callback := func(progress int64, total int64) {
+	callback := func(taskName string, progress int64, total int64) {
 		// This is a dummy callback function
 		t.Logf("Progress: %d/%d", progress, total)
 	}

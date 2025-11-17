@@ -521,7 +521,7 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 		manager := job.GetManager()
 		fs := manager.GetFilesystem()
 
-		callbackSubmit := func(processed int64, total int64) {
+		callbackSubmit := func(taskName string, processed int64, total int64) {
 			job.Progress(processed, total, false)
 		}
 
@@ -537,12 +537,12 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 		transferMode := submit.determineTransferMode(sourceStat.Size())
 		switch transferMode {
 		case commons.TransferModeRedirect:
-			uploadResult, uploadErr = fs.UploadFileRedirectToResource(sourcePath, targetPath, "", threadsRequired, false, true, true, false, callbackSubmit)
+			uploadResult, uploadErr = fs.UploadFileRedirectToResource(sourcePath, targetPath, "", threadsRequired, false, true, false, callbackSubmit)
 			notes = append(notes, "redirect-to-resource", fmt.Sprintf("%d threads", threadsRequired))
 		case commons.TransferModeICAT:
 			fallthrough
 		default:
-			uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", threadsRequired, false, true, true, false, callbackSubmit)
+			uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", threadsRequired, false, true, false, callbackSubmit)
 			notes = append(notes, "icat", fmt.Sprintf("%d threads", threadsRequired))
 		}
 
@@ -565,7 +565,7 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 	}
 
 	// submit status file
-	hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5")
+	hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5", nil)
 	if err != nil {
 		return xerrors.Errorf("failed to get hash for %q: %w", sourcePath, err)
 	}
@@ -623,7 +623,7 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 		if targetEntry.Size == sourceStat.Size() {
 			// compare hash
 			if len(targetEntry.CheckSum) > 0 {
-				localChecksum, err := irodsclient_util.HashLocalFile(sourcePath, string(targetEntry.CheckSumAlgorithm))
+				localChecksum, err := irodsclient_util.HashLocalFile(sourcePath, string(targetEntry.CheckSumAlgorithm), nil)
 				if err != nil {
 					return xerrors.Errorf("failed to get hash for %q: %w", sourcePath, err)
 				}
@@ -652,7 +652,7 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 					logger.Debugf("skip uploading a file %q to %q. The file with the same hash already exists!", sourcePath, targetPath)
 
 					// add skipped status entry
-					hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5")
+					hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5", nil)
 					if err != nil {
 						return xerrors.Errorf("failed to get hash for %q: %w", sourcePath, err)
 					}

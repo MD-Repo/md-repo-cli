@@ -1,16 +1,14 @@
 package commons
 
 import (
-	"errors"
 	"fmt"
 
-	"golang.org/x/xerrors"
+	"github.com/cockroachdb/errors"
 )
 
 var (
-	TokenNotProvidedError      error = xerrors.Errorf("token not provided")
-	InvalidOrcIDError          error = xerrors.Errorf("invalid ORC-ID")
-	InvalidSubmitMetadataError error = xerrors.Errorf("invalid submit metadata")
+	TokenNotProvidedError error = errors.Errorf("token not provided")
+	InvalidOrcIDError     error = errors.Errorf("invalid ORC-ID")
 )
 
 type MDRepoServiceError struct {
@@ -173,6 +171,53 @@ func (err *NotFileError) ToString() string {
 // IsNotFileError evaluates if the given error is NotFileError
 func IsNotFileError(err error) bool {
 	return errors.Is(err, &NotFileError{})
+}
+
+type InvalidSubmitMetadataError struct {
+	Errors []error
+}
+
+func NewInvalidSubmitMetadataError() error {
+	return &InvalidSubmitMetadataError{
+		Errors: []error{},
+	}
+}
+
+func (err *InvalidSubmitMetadataError) Add(message error) {
+	if err.Errors == nil {
+		err.Errors = []error{}
+	}
+	err.Errors = append(err.Errors, message)
+}
+
+func (err *InvalidSubmitMetadataError) ErrorLen() int {
+	return len(err.Errors)
+}
+
+// Error returns error message
+func (err *InvalidSubmitMetadataError) Error() string {
+	message := ""
+	for idx, e := range err.Errors {
+		message += fmt.Sprintf("%d. %s\n", idx+1, e.Error())
+	}
+
+	return fmt.Sprintf("invalid submit metadata\n%s", message)
+}
+
+// Is tests type of error
+func (err *InvalidSubmitMetadataError) Is(other error) bool {
+	_, ok := other.(*InvalidSubmitMetadataError)
+	return ok
+}
+
+// ToString stringifies the object
+func (err *InvalidSubmitMetadataError) ToString() string {
+	return fmt.Sprintf("InvalidSubmitMetadataError: \n%q", err.Error())
+}
+
+// IsInvalidSubmitMetadataError evaluates if the given error is InvalidSubmitMetadataError
+func IsInvalidSubmitMetadataError(err error) bool {
+	return errors.Is(err, &InvalidSubmitMetadataError{})
 }
 
 type DialHTTPError struct {

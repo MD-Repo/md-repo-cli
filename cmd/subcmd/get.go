@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	irodsclient_util "github.com/cyverse/go-irodsclient/irods/util"
@@ -17,7 +18,6 @@ import (
 	"github.com/MD-Repo/md-repo-cli/commons"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"golang.org/x/xerrors"
 )
 
 var getCmd = &cobra.Command{
@@ -105,7 +105,7 @@ func NewGetCommand(command *cobra.Command, args []string) (*GetCommand, error) {
 func (get *GetCommand) Process() error {
 	cont, err := flag.ProcessCommonFlags(get.command)
 	if err != nil {
-		return xerrors.Errorf("failed to process common flags: %w", err)
+		return errors.Wrapf(err, "failed to process common flags")
 	}
 
 	if !cont {
@@ -126,13 +126,13 @@ func (get *GetCommand) Process() error {
 	// handle local flags
 	_, err = commons.InputMissingFields()
 	if err != nil {
-		return xerrors.Errorf("failed to input missing fields: %w", err)
+		return errors.Wrapf(err, "failed to input missing fields")
 	}
 
 	if len(config.Token) > 0 && len(config.TicketString) == 0 {
 		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(get.tokenFlagValues.ServiceURL, config.Token)
 		if err != nil {
-			return xerrors.Errorf("failed to read ticket from token: %w", err)
+			return errors.Wrapf(err, "failed to read ticket from token")
 		}
 	}
 
@@ -144,7 +144,7 @@ func (get *GetCommand) Process() error {
 	if get.retryFlagValues.RetryNumber > 0 && !get.retryFlagValues.RetryChild {
 		err = commons.RunWithRetry(get.retryFlagValues.RetryNumber, get.retryFlagValues.RetryIntervalSeconds)
 		if err != nil {
-			return xerrors.Errorf("failed to run with retry %d: %w", get.retryFlagValues.RetryNumber, err)
+			return errors.Wrapf(err, "failed to run with retry %d", get.retryFlagValues.RetryNumber)
 		}
 		return nil
 	}
@@ -152,13 +152,13 @@ func (get *GetCommand) Process() error {
 	// get ticket
 	mdRepoTickets, err := commons.GetMDRepoTicketsFromString(config.TicketString)
 	if err != nil {
-		return xerrors.Errorf("failed to retrieve tickets: %w", err)
+		return errors.Wrapf(err, "failed to retrieve tickets")
 	}
 
 	// transfer report
 	get.transferReportManager, err = commons.NewTransferReportManager(get.transferReportFlagValues.Report, get.transferReportFlagValues.ReportPath, get.transferReportFlagValues.ReportToStdout)
 	if err != nil {
-		return xerrors.Errorf("failed to create transfer report manager: %w", err)
+		return errors.Wrapf(err, "failed to create transfer report manager")
 	}
 	defer get.transferReportManager.Release()
 
@@ -186,12 +186,12 @@ func (get *GetCommand) processTicket(mdRepoTicket *commons.MDRepoTicket) error {
 	// Create a file system
 	account, err := commons.GetAccount(mdRepoTicket)
 	if err != nil {
-		return xerrors.Errorf("failed to get iRODS Account: %w", err)
+		return errors.Wrapf(err, "failed to get iRODS Account")
 	}
 
 	get.filesystem, err = commons.GetIRODSFSClientForLargeFileIO(account, get.maxConnectionNum, get.parallelTransferFlagValues.TCPBufferSize)
 	if err != nil {
-		return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
+		return errors.Wrapf(err, "failed to get iRODS FS Client")
 	}
 	defer get.filesystem.Release()
 
@@ -203,25 +203,25 @@ func (get *GetCommand) processTicket(mdRepoTicket *commons.MDRepoTicket) error {
 	// we create a subdir for ticket
 	dataRelPath, err := commons.GetMDRepoSimulationRelPath(mdRepoTicket.IRODSDataPath)
 	if err != nil {
-		return xerrors.Errorf("failed to extract data path from %q: %w", mdRepoTicket.IRODSDataPath, err)
+		return errors.Wrapf(err, "failed to extract data path from %q", mdRepoTicket.IRODSDataPath)
 	}
 
 	dataTargetPath := filepath.Join(get.targetPath, dataRelPath)
 	targetParentDir := filepath.Dir(dataTargetPath)
 	err = os.MkdirAll(targetParentDir, 0766)
 	if err != nil {
-		return xerrors.Errorf("failed to make a directory %q: %w", targetParentDir, err)
+		return errors.Wrapf(err, "failed to make a directory %q", targetParentDir)
 	}
 
 	err = get.getOne(mdRepoTicket, dataTargetPath)
 	if err != nil {
-		return xerrors.Errorf("failed to get %q to %q: %w", mdRepoTicket.IRODSDataPath, dataTargetPath, err)
+		return errors.Wrapf(err, "failed to get %q to %q", mdRepoTicket.IRODSDataPath, dataTargetPath)
 	}
 
 	get.parallelJobManager.DoneScheduling()
 	err = get.parallelJobManager.Wait()
 	if err != nil {
-		return xerrors.Errorf("failed to perform parallel jobs: %w", err)
+		return errors.Wrapf(err, "failed to perform parallel jobs")
 	}
 
 	return nil
@@ -234,10 +234,10 @@ func (get *GetCommand) ensureTargetIsDir(targetPath string) error {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// not exist
-			return commons.NewNotDirError(targetPath)
+			return errors.Join(err, commons.NewNotDirError(targetPath))
 		}
 
-		return xerrors.Errorf("failed to stat %q: %w", targetPath, err)
+		return errors.Wrapf(err, "failed to stat %q", targetPath)
 	}
 
 	if !targetStat.IsDir() {
@@ -262,7 +262,7 @@ func (get *GetCommand) getOne(mdRepoTicket *commons.MDRepoTicket, targetPath str
 
 	sourceEntry, err := get.filesystem.Stat(sourcePath)
 	if err != nil {
-		return xerrors.Errorf("failed to stat %q: %w", sourcePath, err)
+		return errors.Wrapf(err, "failed to stat %q", sourcePath)
 	}
 
 	if sourceEntry.IsDir() {
@@ -310,7 +310,7 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *commons.MDRepoTicket, sourceEnt
 		err := os.MkdirAll(parentDownloadPath, 0766)
 		if err != nil {
 			job.Progress(-1, sourceEntry.Size, true)
-			return xerrors.Errorf("failed to make a directory %q: %w", parentDownloadPath, err)
+			return errors.Wrapf(err, "failed to make a directory %q", parentDownloadPath)
 		}
 
 		// determine how to download
@@ -331,13 +331,13 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *commons.MDRepoTicket, sourceEnt
 
 		if downloadErr != nil {
 			job.Progress(-1, sourceEntry.Size, true)
-			return xerrors.Errorf("failed to download %q to %q: %w", sourceEntry.Path, targetPath, downloadErr)
+			return errors.Wrapf(downloadErr, "failed to download %q to %q", sourceEntry.Path, targetPath)
 		}
 
 		err = get.transferReportManager.AddTransfer(downloadResult, commons.TransferMethodGet, downloadErr, notes)
 		if err != nil {
 			job.Progress(-1, sourceEntry.Size, true)
-			return xerrors.Errorf("failed to add transfer report: %w", err)
+			return errors.Wrapf(err, "failed to add transfer report")
 		}
 
 		logger.Debugf("downloaded a data object %q to %q", sourceEntry.Path, targetPath)
@@ -349,7 +349,7 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *commons.MDRepoTicket, sourceEnt
 
 	err := get.parallelJobManager.Schedule(sourceEntry.Path, getTask, threadsRequired, progress.UnitsBytes)
 	if err != nil {
-		return xerrors.Errorf("failed to schedule download %q to %q: %w", sourceEntry.Path, targetPath, err)
+		return errors.Wrapf(err, "failed to schedule download %q to %q", sourceEntry.Path, targetPath)
 	}
 
 	logger.Debugf("scheduled a data object download %q to %q, %d threads", sourceEntry.Path, targetPath, threadsRequired)
@@ -374,7 +374,7 @@ func (get *GetCommand) getFile(mdRepoTicket *commons.MDRepoTicket, sourceEntry *
 			return get.scheduleGet(mdRepoTicket, sourceEntry, tempPath, targetPath, false)
 		}
 
-		return xerrors.Errorf("failed to stat %q: %w", targetPath, err)
+		return errors.Wrapf(err, "failed to stat %q", targetPath)
 	}
 
 	// target exists
@@ -389,7 +389,7 @@ func (get *GetCommand) getFile(mdRepoTicket *commons.MDRepoTicket, sourceEntry *
 			if len(sourceEntry.CheckSum) > 0 {
 				localChecksum, err := irodsclient_util.HashLocalFile(targetPath, string(sourceEntry.CheckSumAlgorithm), nil)
 				if err != nil {
-					return xerrors.Errorf("failed to get hash of %q: %w", targetPath, err)
+					return errors.Wrapf(err, "failed to get hash of %q", targetPath)
 				}
 
 				if bytes.Equal(sourceEntry.CheckSum, localChecksum) {
@@ -442,7 +442,7 @@ func (get *GetCommand) getDir(mdRepoTicket *commons.MDRepoTicket, sourceEntry *i
 			// target must be a directorywith new name
 			err = os.MkdirAll(targetPath, 0766)
 			if err != nil {
-				return xerrors.Errorf("failed to make a directory %q: %w", targetPath, err)
+				return errors.Wrapf(err, "failed to make a directory %q", targetPath)
 			}
 
 			now := time.Now()
@@ -457,7 +457,7 @@ func (get *GetCommand) getDir(mdRepoTicket *commons.MDRepoTicket, sourceEntry *i
 
 			get.transferReportManager.AddFile(reportFile)
 		} else {
-			return xerrors.Errorf("failed to stat %q: %w", targetPath, err)
+			return errors.Wrapf(err, "failed to stat %q", targetPath)
 		}
 	} else {
 		// target exists
@@ -469,7 +469,7 @@ func (get *GetCommand) getDir(mdRepoTicket *commons.MDRepoTicket, sourceEntry *i
 	// get entries
 	entries, err := get.filesystem.List(sourceEntry.Path)
 	if err != nil {
-		return xerrors.Errorf("failed to list a directory %q: %w", sourceEntry.Path, err)
+		return errors.Wrapf(err, "failed to list a directory %q", sourceEntry.Path)
 	}
 
 	for _, entry := range entries {

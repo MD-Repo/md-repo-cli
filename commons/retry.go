@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/xerrors"
 )
 
 func RunWithRetry(retry int, retryInterval int) error {
@@ -36,7 +36,7 @@ func RunWithRetry(retry int, retryInterval int) error {
 	}
 
 	if err != nil {
-		err = xerrors.Errorf("failed to run after %d retries, job failed: %w", retry, err)
+		err = errors.Wrapf(err, "failed to run after %d retries, job failed", retry)
 		logger.Errorf("%+v", err)
 		return err
 	}
@@ -50,7 +50,7 @@ func runChild() error {
 
 	configTypeInYamlBytes, err := configTypeIn.ToYAML()
 	if err != nil {
-		yamlErr := xerrors.Errorf("failed to get config yaml: %w", err)
+		yamlErr := errors.Wrapf(err, "failed to get config yaml")
 		return yamlErr
 	}
 
@@ -96,21 +96,21 @@ func runChild() error {
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
-		pipeErr := xerrors.Errorf("failed to get stdin pipe: %w", err)
+		pipeErr := errors.Wrap(err, "failed to get stdin pipe")
 		return pipeErr
 	}
 
 	// start
 	err = cmd.Start()
 	if err != nil {
-		cmdErr := xerrors.Errorf("failed to start the child process: %w", err)
+		cmdErr := errors.Wrap(err, "failed to start the child process")
 		return cmdErr
 	}
 
 	// send config to stdin
 	_, err = stdinPipe.Write(configTypeInYamlBytes)
 	if err != nil {
-		writeErr := xerrors.Errorf("failed to send config yaml to stdin pipe: %w", err)
+		writeErr := errors.Wrap(err, "failed to send config yaml to stdin pipe")
 		return writeErr
 	}
 
@@ -118,7 +118,7 @@ func runChild() error {
 
 	err = cmd.Wait()
 	if err != nil {
-		cmdErr := xerrors.Errorf("failed to wait the child process: %w", err)
+		cmdErr := errors.Wrap(err, "failed to wait the child process")
 		return cmdErr
 	}
 	return nil

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/cyverse/go-irodsclient/fs"
-	"golang.org/x/xerrors"
 )
 
 type SubmitStatus string
@@ -46,7 +46,7 @@ func (s *SubmitStatus) UnmarshalJSON(b []byte) error {
 	case string(SubmitStatusCompleted):
 		*s = SubmitStatusCompleted
 	default:
-		return xerrors.Errorf("invalid status format: %q", s)
+		return errors.Errorf("invalid status format %q", s)
 	}
 
 	return nil
@@ -115,21 +115,21 @@ func (s *SubmitStatusFile) CreateStatusFile(filesystem *fs.FileSystem, dataRootP
 
 	jsonBytes, err := json.Marshal(s)
 	if err != nil {
-		return xerrors.Errorf("failed to marshal submit status file to json: %w", err)
+		return errors.Wrapf(err, "failed to marshal submit status file to json")
 	}
 
 	// Note: We cannot remove old status files. Ticket does not support delete/move/rename operations
 	// remove old status files
 	//existingDirEntries, err := filesystem.List(dataRootPath)
 	//if err != nil {
-	//	return xerrors.Errorf("failed to list target directory: %w", err)
+	//	return errors.Wrapf(err, "failed to list target directory")
 	//}
 
 	//for _, existingDirEntry := range existingDirEntries {
 	//	if IsStatusFile(existingDirEntry.Name) {
 	//		err = filesystem.RemoveFile(existingDirEntry.Path, true)
 	//		if err != nil {
-	//			return xerrors.Errorf("failed to delete stale submit status file %q: %w", existingDirEntry.Path, err)
+	//			return errors.Wrapf(err, "failed to delete stale submit status file %q", existingDirEntry.Path)
 	//		}
 	//	}
 	//}
@@ -138,13 +138,13 @@ func (s *SubmitStatusFile) CreateStatusFile(filesystem *fs.FileSystem, dataRootP
 	jsonBytesBuffer := bytes.Buffer{}
 	_, err = jsonBytesBuffer.Write(jsonBytes)
 	if err != nil {
-		return xerrors.Errorf("failed to write submit status to buffer: %w", err)
+		return errors.Wrapf(err, "failed to write submit status to buffer")
 	}
 
 	// we do not truncate status file as it should be empty
 	_, err = filesystem.UploadFileFromBuffer(&jsonBytesBuffer, statusFilePath, "", false, true, true, nil)
 	if err != nil {
-		return xerrors.Errorf("failed to create submit status file %q: %w", statusFilePath, err)
+		return errors.Wrapf(err, "failed to create submit status file %q", statusFilePath)
 	}
 
 	return nil

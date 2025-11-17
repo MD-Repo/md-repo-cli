@@ -4,10 +4,10 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/cockroachdb/errors"
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	"github.com/jedib0t/go-pretty/v6/progress"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -169,7 +169,7 @@ func (manager *ParallelJobManager) Wait() error {
 	}
 
 	if manager.jobsDoneCounter != manager.jobsScheduledCounter {
-		return xerrors.Errorf("jobs '%d/%d' were not completed!", manager.jobsDoneCounter, manager.jobsScheduledCounter)
+		return errors.Errorf("jobs '%d/%d' were not completed!", manager.jobsDoneCounter, manager.jobsScheduledCounter)
 	}
 
 	return nil

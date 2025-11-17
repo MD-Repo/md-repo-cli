@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	"github.com/jedib0t/go-pretty/v6/table"
-	"golang.org/x/xerrors"
 )
 
 // TransferMethod determines transfer method
@@ -113,7 +113,7 @@ func NewTransferReportFileFromTransferResult(result *irodsclient_fs.FileTransfer
 			Notes: notes,
 		}, nil
 	} else {
-		return nil, xerrors.Errorf("unknown method %q", method)
+		return nil, errors.Errorf("unknown method %q", method)
 	}
 }
 
@@ -138,7 +138,7 @@ func NewTransferReportManager(report bool, reportPath string, reportToStdout boo
 		// file
 		fileWriter, err := os.Create(reportPath)
 		if err != nil {
-			return nil, xerrors.Errorf("failed to create a report file %q: %w", reportPath, err)
+			return nil, errors.Wrapf(err, "failed to create a report file %q", reportPath)
 		}
 		writer = fileWriter
 	}

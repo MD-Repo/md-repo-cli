@@ -3,12 +3,13 @@ package commons
 import (
 	"bytes"
 	"crypto/tls"
-	"errors"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/avast/retry-go"
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
@@ -17,7 +18,6 @@ import (
 	irodsclient_util "github.com/cyverse/go-irodsclient/irods/util"
 	log "github.com/sirupsen/logrus"
 	"github.com/studio-b12/gowebdav"
-	"golang.org/x/xerrors"
 )
 
 func GetWebDAVPathForIRODSPath(irodsPath string, ticket string) string {
@@ -79,14 +79,14 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 	fileTransferResult.IRODSSize = sourceEntry.Size
 
 	if len(sourceEntry.CheckSum) == 0 {
-		return fileTransferResult, xerrors.Errorf("failed to get checksum of the source file for path %q", irodsSrcPath)
+		return fileTransferResult, errors.Errorf("failed to get checksum of the source file for path %q", irodsSrcPath)
 	}
 
 	if sourceEntry.Size == 0 {
 		// zero size file, just create an empty file
 		f, err := os.OpenFile(localPath, os.O_RDWR|os.O_CREATE, 0666)
 		if err != nil {
-			return fileTransferResult, xerrors.Errorf("failed to create a local file %s: %w", localPath, err)
+			return fileTransferResult, errors.Wrapf(err, "failed to create a local file %q", localPath)
 		}
 		f.Close()
 
@@ -161,17 +161,17 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 			reader, readErr := client.ReadStreamRange(webdavPath, offset, readSize)
 			if readErr != nil {
 				baseErr := GetWebDavError(mdRepoWebDAVServerURL+webdavPath, readErr)
-				return xerrors.Errorf("failed to read stream range of file %s (offset %d, length %d) from WebDAV server: %w", webdavPath, offset, readSize, baseErr)
+				return errors.Wrapf(baseErr, "failed to read stream range of file %q (offset %d, length %d) from WebDAV server", webdavPath, offset, readSize)
 			}
 			defer reader.Close()
 
 			newOffset, downloadErr := downloadToLocalWithTrackerCallBack(reader, localFilePath, offset, readSize, sourceEntry.Size, callback)
 			if downloadErr != nil {
-				logger.WithError(downloadErr).Debugf("failed to download file %s (offset %d, length %d) from WebDAV server", webdavPath, offset, readSize)
+				logger.WithError(downloadErr).Debugf("failed to download file %q (offset %d, length %d) from WebDAV server", webdavPath, offset, readSize)
 
 				// if the download failed, we need to update the offset
 				offset = newOffset
-				return xerrors.Errorf("failed to download file %s (offset %d, length %d) from WebDAV server: %w", webdavPath, offset, readSize, downloadErr)
+				return errors.Wrapf(downloadErr, "failed to download file %q (offset %d, length %d) from WebDAV server", webdavPath, offset, readSize)
 			}
 
 			offset = newOffset
@@ -186,9 +186,9 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 			if errors.Is(retryErr, io.ErrUnexpectedEOF) && offsetLast < offset {
 				// progress was made
 				// continue to retry
-				logger.WithError(retryErr).Debugf("downloaded file %s (offset %d, length %d, data left %d) from WebDAV server, but got unexpected EOF, retrying...", webdavPath, offset, offset-offsetLast, readSize)
+				logger.WithError(retryErr).Debugf("downloaded file %q (offset %d, length %d, data left %d) from WebDAV server, but got unexpected EOF, retrying...", webdavPath, offset, offset-offsetLast, readSize)
 			} else {
-				return fileTransferResult, xerrors.Errorf("failed to download file %s (offset %d, length %d) from WebDAV server after 3 attempts: %w", webdavPath, offset, readSize, retryErr)
+				return fileTransferResult, errors.Wrapf(retryErr, "failed to download file %q (offset %d, length %d) from WebDAV server after 3 attempts", webdavPath, offset, readSize)
 			}
 		}
 	}
@@ -197,14 +197,14 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 
 	localHash, err := calculateLocalFileHash(localPath, sourceEntry.CheckSumAlgorithm)
 	if err != nil {
-		return fileTransferResult, xerrors.Errorf("failed to calculate hash of local file %s with alg %s: %w", localPath, sourceEntry.CheckSumAlgorithm, err)
+		return fileTransferResult, errors.Wrapf(err, "failed to calculate hash of local file %q with alg %s", localPath, sourceEntry.CheckSumAlgorithm)
 	}
 
 	fileTransferResult.LocalCheckSumAlgorithm = sourceEntry.CheckSumAlgorithm
 	fileTransferResult.LocalCheckSum = localHash
 
 	if !bytes.Equal(sourceEntry.CheckSum, localHash) {
-		return fileTransferResult, xerrors.Errorf("checksum verification failed, download failed")
+		return fileTransferResult, errors.Errorf("checksum verification failed for local file %q, download failed", localPath)
 	}
 
 	fileTransferResult.EndTime = time.Now()
@@ -216,7 +216,7 @@ func calculateLocalFileHash(localPath string, algorithm irodsclient_types.Checks
 	// verify checksum
 	hashBytes, err := irodsclient_util.HashLocalFile(localPath, string(algorithm), nil)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to get %q hash of %q: %w", algorithm, localPath, err)
+		return nil, errors.Wrapf(err, "failed to get %q hash of %q", algorithm, localPath)
 	}
 
 	return hashBytes, nil
@@ -225,17 +225,17 @@ func calculateLocalFileHash(localPath string, algorithm irodsclient_types.Checks
 func downloadToLocalWithTrackerCallBack(reader io.ReadCloser, localPath string, offset int64, readLength int64, fileSize int64, callback irodsclient_common.TransferTrackerCallback) (int64, error) {
 	f, err := os.OpenFile(localPath, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
-		return offset, xerrors.Errorf("failed to open local file %s: %w", localPath, err)
+		return offset, errors.Wrapf(err, "failed to open local file %q", localPath)
 	}
 	defer f.Close()
 
 	newOffset, err := f.Seek(offset, io.SeekStart)
 	if err != nil {
-		return offset, xerrors.Errorf("failed to seek to offset %d in local file %s: %w", offset, localPath, err)
+		return offset, errors.Wrapf(err, "failed to seek to offset %d in local file %q", offset, localPath)
 	}
 
 	if newOffset != offset {
-		return offset, xerrors.Errorf("failed to seek to offset %d in local file %s, current offset is %d", offset, localPath, newOffset)
+		return offset, errors.Errorf("failed to seek to offset %d in local file %q, current offset is %d", offset, localPath, newOffset)
 	}
 
 	if callback != nil {
@@ -256,11 +256,11 @@ func downloadToLocalWithTrackerCallBack(reader io.ReadCloser, localPath string, 
 
 			sizeWritten, writeErr := f.Write(buffer[:sizeRead])
 			if writeErr != nil {
-				return offset + actualWrite, xerrors.Errorf("failed to write to local file %s: %w", localPath, writeErr)
+				return offset + actualWrite, errors.Wrapf(writeErr, "failed to write to local file %q", localPath)
 			}
 
 			if sizeWritten != sizeRead {
-				return offset + actualWrite, xerrors.Errorf("failed to write all bytes to local file %s, expected %d, got %d", localPath, sizeRead, sizeWritten)
+				return offset + actualWrite, errors.Errorf("failed to write all bytes to local file %q, expected %d, got %d", localPath, sizeRead, sizeWritten)
 			}
 
 			actualWrite += int64(sizeWritten)
@@ -275,12 +275,12 @@ func downloadToLocalWithTrackerCallBack(reader io.ReadCloser, localPath string, 
 				break
 			}
 
-			return offset + actualWrite, xerrors.Errorf("failed to read from reader: %w", err)
+			return offset + actualWrite, errors.Wrapf(err, "failed to read from reader")
 		}
 	}
 
 	if actualWrite != readLength {
-		return offset + actualWrite, xerrors.Errorf("file size mismatch: expected %d, got %d", readLength, actualRead)
+		return offset + actualWrite, errors.Errorf("file size mismatch, expected %d, got %d", readLength, actualRead)
 	}
 
 	return offset + actualWrite, nil

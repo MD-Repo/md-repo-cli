@@ -11,12 +11,12 @@ import (
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/commons"
+	"github.com/cockroachdb/errors"
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_irodsfs "github.com/cyverse/go-irodsclient/irods/fs"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"golang.org/x/xerrors"
 )
 
 var submitListCmd = &cobra.Command{
@@ -76,7 +76,7 @@ func (submitls *SubmitListCommand) Process() error {
 
 	cont, err := flag.ProcessCommonFlags(submitls.command)
 	if err != nil {
-		return xerrors.Errorf("failed to process common flags: %w", err)
+		return errors.Wrapf(err, "failed to process common flags")
 	}
 
 	if !cont {
@@ -97,7 +97,7 @@ func (submitls *SubmitListCommand) Process() error {
 	// handle local flags
 	_, err = commons.InputMissingFields()
 	if err != nil {
-		return xerrors.Errorf("failed to input missing fields: %w", err)
+		return errors.Wrapf(err, "failed to input missing fields")
 	}
 
 	if len(config.Token) > 0 && len(config.TicketString) == 0 {
@@ -113,19 +113,19 @@ func (submitls *SubmitListCommand) Process() error {
 		// encrypt
 		tokenBytes, err := commons.Base64Decode(config.Token)
 		if err != nil {
-			return xerrors.Errorf("failed to decode token using BASE64: %w", err)
+			return errors.Wrapf(err, "failed to decode token using BASE64")
 		}
 
 		newToken, err := commons.HMACStringSHA224(tokenBytes, orcID)
 		if err != nil {
-			return xerrors.Errorf("failed to encrypt token using SHA3-224 HMAC: %w", err)
+			return errors.Wrapf(err, "failed to encrypt token using SHA3-224 HMAC")
 		}
 
 		logger.Debugf("encrypted token: %s", newToken)
 
 		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(submitls.tokenFlagValues.ServiceURL, newToken)
 		if err != nil {
-			return xerrors.Errorf("failed to read ticket from token: %w", err)
+			return errors.Wrapf(err, "failed to read ticket from token")
 		}
 	}
 
@@ -136,18 +136,18 @@ func (submitls *SubmitListCommand) Process() error {
 	// get ticket
 	mdRepoTicket, err := commons.GetMDRepoTicketFromString(config.TicketString)
 	if err != nil {
-		return xerrors.Errorf("failed to retrieve ticket: %w", err)
+		return errors.Wrapf(err, "failed to retrieve ticket")
 	}
 
 	// Create a file system
 	submitls.account, err = commons.GetAccount(&mdRepoTicket)
 	if err != nil {
-		return xerrors.Errorf("failed to get iRODS Account: %w", err)
+		return errors.Wrapf(err, "failed to get iRODS Account")
 	}
 
 	submitls.filesystem, err = commons.GetIRODSFSClient(submitls.account)
 	if err != nil {
-		return xerrors.Errorf("failed to get iRODS FS Client: %w", err)
+		return errors.Wrapf(err, "failed to get iRODS FS Client")
 	}
 	defer submitls.filesystem.Release()
 
@@ -158,7 +158,7 @@ func (submitls *SubmitListCommand) Process() error {
 
 	err = submitls.listOne(sourcePath, sourcePath)
 	if err != nil {
-		return xerrors.Errorf("failed to list %q: %w", sourcePath, err)
+		return errors.Wrapf(err, "failed to list %q", sourcePath)
 	}
 
 	return nil
@@ -167,19 +167,19 @@ func (submitls *SubmitListCommand) Process() error {
 func (submitls *SubmitListCommand) listOne(sourceRootPath string, sourcePath string) error {
 	connection, err := submitls.filesystem.GetMetadataConnection(true)
 	if err != nil {
-		return xerrors.Errorf("failed to get connection: %w", err)
+		return errors.Wrapf(err, "failed to get connection")
 	}
 	defer submitls.filesystem.ReturnMetadataConnection(connection)
 
 	// collection
 	colls, err := irodsclient_irodsfs.ListSubCollections(connection, sourcePath)
 	if err != nil {
-		return xerrors.Errorf("failed to list sub-collections in %q: %w", sourcePath, err)
+		return errors.Wrapf(err, "failed to list sub-collections in %q", sourcePath)
 	}
 
 	objs, err := irodsclient_irodsfs.ListDataObjects(connection, sourcePath)
 	if err != nil {
-		return xerrors.Errorf("failed to list data-objects in %q: %w", sourcePath, err)
+		return errors.Wrapf(err, "failed to list data-objects in %q", sourcePath)
 	}
 
 	// print text
@@ -193,7 +193,7 @@ func (submitls *SubmitListCommand) listOne(sourceRootPath string, sourcePath str
 		fmt.Printf("\n")
 		err = submitls.listOne(sourceRootPath, coll.Path)
 		if err != nil {
-			return xerrors.Errorf("failed to list %q: %w", coll.Path, err)
+			return errors.Wrapf(err, "failed to list %q", coll.Path)
 		}
 	}
 
@@ -203,7 +203,7 @@ func (submitls *SubmitListCommand) listOne(sourceRootPath string, sourcePath str
 				commons.Printf("\n")
 				err = submitls.catStatusFile(obj.Path)
 				if err != nil {
-					return xerrors.Errorf("failed to cat status file %q: %w", obj.Path, err)
+					return errors.Wrapf(err, "failed to cat status file %q", obj.Path)
 				}
 				break
 			}
@@ -218,7 +218,7 @@ func (submitls *SubmitListCommand) catStatusFile(sourcePath string) error {
 
 	_, err := submitls.filesystem.DownloadFileToBuffer(sourcePath, "", &buffer, true, nil)
 	if err != nil {
-		return xerrors.Errorf("failed to download file %q: %w", sourcePath, err)
+		return errors.Wrapf(err, "failed to download file %q", sourcePath)
 	}
 
 	fmt.Printf("[SUBMISSION STATUS INFO]\n")
@@ -240,15 +240,13 @@ func (submitls *SubmitListCommand) getPrettyStatusFileJSON(jsonBytes []byte) str
 	status := commons.SubmitStatusFile{}
 	err := json.Unmarshal(jsonBytes, &status)
 	if err != nil {
-		xerr := xerrors.Errorf("failed to decode json: %w", err)
-		logger.Error(xerr)
+		logger.Error(errors.Wrapf(err, "failed to decode json"))
 		return prettyJson
 	}
 
 	jsonStr, err := json.MarshalIndent(status, "", "    ")
 	if err != nil {
-		xerr := xerrors.Errorf("failed to marshal to json: %w", err)
-		logger.Error(xerr)
+		logger.Error(errors.Wrapf(err, "failed to marshal to json"))
 		return prettyJson
 	}
 

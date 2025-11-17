@@ -4,9 +4,9 @@ import (
 	"io"
 
 	"github.com/MD-Repo/md-repo-cli/commons"
+	"github.com/cockroachdb/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"golang.org/x/xerrors"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -124,7 +124,7 @@ func ProcessCommonFlags(command *cobra.Command) (bool, error) {
 		// read from stdin
 		err := commons.InputMissingFieldsFromStdin()
 		if err != nil {
-			return false, xerrors.Errorf("failed to load config from stdin: %w", err) // stop here
+			return false, errors.Wrapf(err, "failed to load config from stdin") // stop here
 		}
 	}
 
@@ -134,7 +134,7 @@ func ProcessCommonFlags(command *cobra.Command) (bool, error) {
 func printVersion() error {
 	info, err := commons.GetVersionJSON()
 	if err != nil {
-		return xerrors.Errorf("failed to get version json: %w", err)
+		return errors.Wrapf(err, "failed to get version json")
 	}
 
 	commons.Println(info)

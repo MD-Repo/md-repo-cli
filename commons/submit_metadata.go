@@ -9,9 +9,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/hashicorp/go-multierror"
+	"github.com/cockroachdb/errors"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/xerrors"
 )
 
 type MDRepoSubmitMetadata struct {
@@ -61,7 +60,7 @@ func ParseSubmitMetadataFile(filePath string) (*MDRepoSubmitMetadata, error) {
 
 	_, err := toml.DecodeFile(filePath, &metadata)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to parse submission metadata at %q: %w", filePath, err)
+		return nil, errors.Wrapf(err, "failed to parse submission metadata at %q", filePath)
 	}
 
 	return &metadata, nil
@@ -75,7 +74,7 @@ func ParseSubmitMetadataDir(dirPath string) (*MDRepoSubmitMetadata, error) {
 
 	_, err := toml.DecodeFile(metadata.MetadataFilePath, &metadata)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to parse submission metadata at %q: %w", metadata.MetadataFilePath, err)
+		return nil, errors.Wrapf(err, "failed to parse submission metadata at %q", metadata.MetadataFilePath)
 	}
 
 	return &metadata, nil
@@ -89,7 +88,7 @@ func ParseSubmitMetadataString(metadataString string) (*MDRepoSubmitMetadata, er
 
 	_, err := toml.Decode(metadataString, &metadata)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to parse submission metadata: %w", err)
+		return nil, errors.Wrapf(err, "failed to parse submission metadata")
 	}
 
 	return &metadata, nil
@@ -104,7 +103,7 @@ func (meta *MDRepoSubmitMetadata) GetOrcID() (string, error) {
 		return string(primaryContributorOrcID.(string)), nil
 	}
 
-	return "", xerrors.Errorf("no ORCID found")
+	return "", errors.Errorf("no ORCID found")
 }
 
 func (meta *MDRepoSubmitMetadata) hasLocalFile(filePath string) bool {
@@ -123,7 +122,7 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 		"function": "ValidateFiles",
 	})
 
-	var allErrors error
+	invalidSubmitMetadataError := &InvalidSubmitMetadataError{}
 
 	hasTrajectory := false
 	hasStructure := false
@@ -143,28 +142,28 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 		absFilepath := filepath.Join(meta.SubmissionPath, file)
 
 		if !meta.hasLocalFile(absFilepath) {
-			errObj := xerrors.Errorf("required file %q - %q not found: %w", filekey, absFilepath, InvalidSubmitMetadataError)
-			logger.Error(errObj)
-			allErrors = multierror.Append(allErrors, errObj)
+			newErr := errors.Errorf("required file %q described in metadata %q not found", filekey, absFilepath)
+			logger.Error(newErr)
+			invalidSubmitMetadataError.Add(newErr)
 		}
 	}
 
 	if !hasTrajectory {
-		errObj := xerrors.Errorf("field 'trajectory_file_name' not found: %w", InvalidSubmitMetadataError)
-		logger.Error(errObj)
-		allErrors = multierror.Append(allErrors, errObj)
+		newErr := errors.Errorf("field 'trajectory_file_name' not found")
+		logger.Error(newErr)
+		invalidSubmitMetadataError.Add(newErr)
 	}
 
 	if !hasStructure {
-		errObj := xerrors.Errorf("field 'structure_file_name' not found: %w", InvalidSubmitMetadataError)
-		logger.Error(errObj)
-		allErrors = multierror.Append(allErrors, errObj)
+		newErr := errors.Errorf("field 'structure_file_name' not found")
+		logger.Error(newErr)
+		invalidSubmitMetadataError.Add(newErr)
 	}
 
 	if !hasTopology {
-		errObj := xerrors.Errorf("field 'topology_file_name' not found: %w", InvalidSubmitMetadataError)
-		logger.Error(errObj)
-		allErrors = multierror.Append(allErrors, errObj)
+		newErr := errors.Errorf("field 'topology_file_name' not found")
+		logger.Error(newErr)
+		invalidSubmitMetadataError.Add(newErr)
 	}
 
 	for _, additionalFile := range meta.AdditionalFiles {
@@ -173,16 +172,17 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 				absFilepath := filepath.Join(meta.SubmissionPath, file)
 
 				if !meta.hasLocalFile(absFilepath) {
-					errObj := xerrors.Errorf("additional file %q - %q not found: %w", filekey, absFilepath, InvalidSubmitMetadataError)
-					logger.Error(errObj)
-					allErrors = multierror.Append(allErrors, errObj)
+
+					newErr := errors.Errorf("additional file %q described in metadata %q not found", filekey, absFilepath)
+					logger.Error(newErr)
+					invalidSubmitMetadataError.Add(newErr)
 				}
 			}
 		}
 	}
 
-	if allErrors != nil {
-		return xerrors.Errorf("failed to validate required and additional files listed in submission metadata: %w", allErrors)
+	if invalidSubmitMetadataError.ErrorLen() > 0 {
+		return errors.Wrapf(invalidSubmitMetadataError, "failed to validate required and additional files listed in submission metadata")
 	}
 
 	return nil
@@ -213,7 +213,7 @@ func VerifySubmitMetadataViaServer(sourcePaths []string, serviceURL string, toke
 	apiURL := mdRepoURL + mdRepoVerifyMetadataApi
 	if len(serviceURL) > 0 {
 		if !strings.HasPrefix(serviceURL, "http") {
-			return xerrors.Errorf("failed to make API endpoint URL from non-http/s URL %q", serviceURL)
+			return errors.Errorf("failed to make API endpoint URL from non-http/s URL %q", serviceURL)
 		}
 
 		apiURL = strings.TrimRight(serviceURL, "/") + mdRepoVerifyMetadataApi
@@ -223,7 +223,7 @@ func VerifySubmitMetadataViaServer(sourcePaths []string, serviceURL string, toke
 
 	req, err := http.NewRequest("POST", apiURL, nil)
 	if err != nil {
-		return xerrors.Errorf("failed to create a new request to verify submit metadata: %w", err)
+		return errors.Wrapf(err, "failed to create a new request to verify submit metadata")
 	}
 
 	verifyRequests := []MDRepoVerifySubmitMetadataRequest{}
@@ -231,7 +231,7 @@ func VerifySubmitMetadataViaServer(sourcePaths []string, serviceURL string, toke
 		metadataPath := filepath.Join(sourcePath, SubmissionMetadataFilename)
 		metadataBytes, err := os.ReadFile(metadataPath)
 		if err != nil {
-			return xerrors.Errorf("failed to read submit metadata %q: %w", metadataPath, err)
+			return errors.Wrapf(err, "failed to read submit metadata %q", metadataPath)
 		}
 
 		verifyRequest := MDRepoVerifySubmitMetadataRequest{
@@ -245,7 +245,7 @@ func VerifySubmitMetadataViaServer(sourcePaths []string, serviceURL string, toke
 
 	verifyRequestsJSON, err := json.Marshal(verifyRequests)
 	if err != nil {
-		return xerrors.Errorf("failed to marshal submit metadata verify request to JSON: %w", err)
+		return errors.Wrapf(err, "failed to marshal submit metadata verify request to JSON")
 	}
 
 	verifyRequestsJSONString := string(verifyRequestsJSON)
@@ -264,43 +264,41 @@ func VerifySubmitMetadataViaServer(sourcePaths []string, serviceURL string, toke
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return xerrors.Errorf("failed to perform http post to verify submit metadata: %w", err)
+		return errors.Wrapf(err, "failed to perform http post to verify submit metadata")
 	}
 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return xerrors.Errorf("failed to verify submit metadata, http error %q", resp.Status)
+		return errors.Errorf("failed to verify submit metadata, http error %q", resp.Status)
 	}
 
 	verifyResponseBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return xerrors.Errorf("failed to verify submit metadata, read failed: %w", err)
+		return errors.Wrapf(err, "failed to verify submit metadata, read failed")
 	}
 
 	verifyResponses := []MDRepoVerifySubmitMetadataResponse{}
 	err = json.Unmarshal(verifyResponseBytes, &verifyResponses)
 	if err != nil {
-		return xerrors.Errorf("failed to unmarshal submit metadata verify response from JSON: %w", err)
+		return errors.Wrapf(err, "failed to unmarshal submit metadata verify response from JSON")
 	}
 
-	var verifyError error
+	verifyErrors := &InvalidSubmitMetadataError{}
 	valid := true
 	for _, verifyResponse := range verifyResponses {
 		if !verifyResponse.Valid {
 			if len(verifyResponse.Errors) > 0 {
 				// error
-				for _, verifyRespnseError := range verifyResponse.Errors {
-					verifyErrorObj := xerrors.Errorf("%s, path %q: %w", verifyRespnseError, verifyResponse.LocalDataDirPath, InvalidSubmitMetadataError)
-					logger.Error(verifyErrorObj)
-
-					verifyError = multierror.Append(verifyError, verifyErrorObj)
+				for _, verifyResponseError := range verifyResponse.Errors {
+					newErr := errors.Errorf("%s, path %q", verifyResponseError, verifyResponse.LocalDataDirPath)
+					logger.Error(newErr)
+					verifyErrors.Add(newErr)
 				}
 			} else {
-				verifyErrorObj := xerrors.Errorf("invalid submit metadata, path %q: %w", verifyResponse.LocalDataDirPath, InvalidSubmitMetadataError)
-				logger.Error(verifyErrorObj)
-
-				verifyError = multierror.Append(verifyError, verifyErrorObj)
+				newErr := errors.Errorf("invalid submit metadata, path %q", verifyResponse.LocalDataDirPath)
+				logger.Error(newErr)
+				verifyErrors.Add(newErr)
 			}
 
 			valid = false
@@ -311,5 +309,11 @@ func VerifySubmitMetadataViaServer(sourcePaths []string, serviceURL string, toke
 		return nil
 	}
 
-	return verifyError
+	if verifyErrors.ErrorLen() == 0 {
+		newErr := errors.Errorf("submit metadata verification failed with unknown error")
+		logger.Error(newErr)
+		verifyErrors.Add(newErr)
+	}
+
+	return errors.Wrapf(verifyErrors, "submit metadata verification failed")
 }

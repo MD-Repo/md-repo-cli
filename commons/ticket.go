@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/xerrors"
 )
 
 type MDRepoTicket struct {
@@ -35,18 +35,18 @@ func GetMDRepoTicketString(tickets []MDRepoTicket) (string, error) {
 func GetMDRepoTicketFromString(ticketString string) (MDRepoTicket, error) {
 	ticketParts := strings.Split(string(ticketString), ":")
 	if len(ticketParts) != 2 {
-		return MDRepoTicket{}, xerrors.Errorf("failed to parse ticket parts. must have two parts: %w", NewInvalidTicketError(ticketString))
+		return MDRepoTicket{}, errors.Wrapf(NewInvalidTicketError(ticketString), "failed to parse ticket parts. must have two parts")
 	}
 
 	irodsTicket := ticketParts[0]
 	irodsDataPath := ticketParts[1]
 
 	if !isAsciiString(irodsTicket) {
-		return MDRepoTicket{}, xerrors.Errorf("failed to parse iRODS ticket. iRODS ticket string %q is invalid: %w", irodsTicket, NewInvalidTicketError(ticketString))
+		return MDRepoTicket{}, errors.Wrapf(NewInvalidTicketError(ticketString), "failed to parse iRODS ticket. iRODS ticket string %q is invalid", irodsTicket)
 	}
 
 	if !isPathString(irodsDataPath) {
-		return MDRepoTicket{}, xerrors.Errorf("failed to parse iRODS data path. iRODS target path %q is invalid: %w", irodsDataPath, NewInvalidTicketError(ticketString))
+		return MDRepoTicket{}, errors.Wrapf(NewInvalidTicketError(ticketString), "failed to parse iRODS data path. iRODS target path %q is invalid", irodsDataPath)
 	}
 
 	return MDRepoTicket{
@@ -61,13 +61,13 @@ func GetMDRepoSimulationRelPath(irodsPath string) (string, error) {
 		return irodsPath[start+1:], nil
 	}
 
-	return "", xerrors.Errorf("failed to extract submission ID")
+	return "", errors.Errorf("failed to extract submission ID")
 }
 
 func GetMDRepoTicketsFromString(ticketString string) ([]MDRepoTicket, error) {
 	tickets := strings.Split(ticketString, ";")
 	if len(tickets) < 1 {
-		return nil, xerrors.Errorf("failed to parse tickets: %w", NewInvalidTicketError(ticketString))
+		return nil, errors.Wrapf(NewInvalidTicketError(ticketString), "failed to parse tickets")
 	}
 
 	mdRepoTickets := []MDRepoTicket{}
@@ -118,7 +118,7 @@ func GetMDRepoTicketStringFromToken(serviceURL string, token string) (string, er
 	apiURL := mdRepoURL + mdRepoGetTicketApi
 	if len(serviceURL) > 0 {
 		if !strings.HasPrefix(serviceURL, "http") {
-			return "", xerrors.Errorf("failed to make API endpoint URL from non-http/s URL '%s'", serviceURL)
+			return "", errors.Errorf("failed to make API endpoint URL from non-http/s URL %q", serviceURL)
 		}
 
 		apiURL = strings.TrimRight(serviceURL, "/") + mdRepoGetTicketApi
@@ -128,7 +128,7 @@ func GetMDRepoTicketStringFromToken(serviceURL string, token string) (string, er
 
 	req, err := http.NewRequest("POST", apiURL, nil)
 	if err != nil {
-		return "", xerrors.Errorf("failed to create a new request to retrieve tickets: %w", err)
+		return "", errors.Wrapf(err, "failed to create a new request to retrieve tickets")
 	}
 
 	req.Body = io.NopCloser(strings.NewReader(token))
@@ -146,18 +146,18 @@ func GetMDRepoTicketStringFromToken(serviceURL string, token string) (string, er
 	resp, err := client.Do(req)
 	if err != nil {
 		if strings.Contains(err.Error(), "dial tcp") {
-			dialError := xerrors.Errorf("%s: %w", err.Error(), NewDialHTTPError(req.Host))
-			return "", xerrors.Errorf("failed to perform http post to retrieve tickets: %w", dialError)
+			dialError := errors.Join(err, NewDialHTTPError(req.Host))
+			return "", errors.Wrapf(dialError, "failed to perform http post to retrieve tickets")
 		}
 
-		return "", xerrors.Errorf("failed to perform http post to retrieve tickets: %w", err)
+		return "", errors.Wrapf(err, "failed to perform http post to retrieve tickets")
 	}
 
 	defer resp.Body.Close()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", xerrors.Errorf("failed to read response body: %w", err)
+		return "", errors.Wrapf(err, "failed to read response body")
 	}
 
 	if resp.StatusCode != 200 {
@@ -168,7 +168,7 @@ func GetMDRepoTicketStringFromToken(serviceURL string, token string) (string, er
 	ticketObject := MDRepoTicketObject{}
 	err = json.Unmarshal(responseBody, &ticketObject)
 	if err != nil {
-		return "", xerrors.Errorf("failed to unmarshal ticket object from JSON: %w", err)
+		return "", errors.Wrapf(err, "failed to unmarshal ticket object from JSON")
 	}
 
 	return ticketObject.TicketString, nil

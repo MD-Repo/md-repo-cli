@@ -5,8 +5,8 @@ import (
 	"encoding/base64"
 	"hash"
 
+	"github.com/cockroachdb/errors"
 	"golang.org/x/crypto/sha3"
-	"golang.org/x/xerrors"
 )
 
 func HMACStringSHA224(secret []byte, str string) (string, error) {
@@ -19,7 +19,7 @@ func HMACStrings(secret []byte, strs []string, hashAlg func() hash.Hash) (string
 	for _, str := range strs {
 		_, err := hmac.Write([]byte(str))
 		if err != nil {
-			return "", xerrors.Errorf("failed to write: %w", err)
+			return "", errors.Wrapf(err, "failed to write")
 		}
 	}
 

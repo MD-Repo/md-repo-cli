@@ -9,7 +9,6 @@ import (
 	"github.com/MD-Repo/md-repo-cli/cmd/subcmd"
 	"github.com/MD-Repo/md-repo-cli/commons"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
-	"github.com/hashicorp/go-multierror"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -184,9 +183,12 @@ func main() {
 			} else {
 				commons.PrintErrorf("MD-Repo service error!\nMD-Repo server might be temporarily unavailable.\nPlease try again in a few minutes.\n")
 			}
-		} else if merr, ok := err.(*multierror.Error); ok {
-			for _, merrElem := range merr.Errors {
-				commons.PrintErrorf("%s\n", merrElem.Error())
+		} else if commons.IsInvalidSubmitMetadataError(err) {
+			var submitMetadataError *commons.InvalidSubmitMetadataError
+			if errors.As(err, &submitMetadataError) {
+				commons.PrintErrorf("%s", submitMetadataError.Error())
+			} else {
+				commons.PrintErrorf("submit metadata error!\n")
 			}
 		} else if commons.IsSimulationNoNotMatchingError(err) {
 			var matchingError *commons.SimulationNoNotMatchingError
@@ -211,7 +213,6 @@ func main() {
 						}
 					}
 				}
-
 			} else {
 				commons.PrintErrorf("MD-Repo simulation number not matching error!\n")
 			}

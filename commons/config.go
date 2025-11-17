@@ -1,7 +1,7 @@
 package commons
 
 import (
-	"golang.org/x/xerrors"
+	"github.com/cockroachdb/errors"
 
 	"gopkg.in/yaml.v3"
 )
@@ -34,7 +34,7 @@ func NewConfigTypeInFromYAML(yamlBytes []byte) (*ConfigTypeIn, error) {
 
 	err := yaml.Unmarshal(yamlBytes, config)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to unmarshal YAML: %w", err)
+		return nil, errors.Wrapf(err, "failed to unmarshal YAML")
 	}
 
 	return config, nil
@@ -44,7 +44,7 @@ func NewConfigTypeInFromYAML(yamlBytes []byte) (*ConfigTypeIn, error) {
 func (config *ConfigTypeIn) ToYAML() ([]byte, error) {
 	yamlBytes, err := yaml.Marshal(config)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to marshal to YAML: %w", err)
+		return nil, errors.Wrapf(err, "failed to marshal to YAML")
 	}
 	return yamlBytes, nil
 }

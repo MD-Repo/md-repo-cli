@@ -5,9 +5,9 @@ import (
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/commons"
+	"github.com/cockroachdb/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"golang.org/x/xerrors"
 )
 
 var upgradeCmd = &cobra.Command{
@@ -57,7 +57,7 @@ func NewUpgradeCommand(command *cobra.Command, args []string) (*UpgradeCommand, 
 func (upgrade *UpgradeCommand) Process() error {
 	cont, err := flag.ProcessCommonFlags(upgrade.command)
 	if err != nil {
-		return xerrors.Errorf("failed to process common flags: %w", err)
+		return errors.Wrapf(err, "failed to process common flags")
 	}
 
 	if !cont {
@@ -66,7 +66,7 @@ func (upgrade *UpgradeCommand) Process() error {
 
 	err = upgrade.upgrade(upgrade.checkVersionFlagValues.Check)
 	if err != nil {
-		return xerrors.Errorf("failed to upgrade to new release: %w", err)
+		return errors.Wrapf(err, "failed to upgrade to new release")
 	}
 
 	return nil
@@ -85,7 +85,7 @@ func (upgrade *UpgradeCommand) upgrade(checkOnly bool) error {
 
 	newRelease, err := commons.CheckNewRelease()
 	if err != nil {
-		return xerrors.Errorf("failed to check new release: %w", err)
+		return errors.Wrapf(err, "failed to check new release")
 	}
 
 	logger.Infof("Latest release version available for %s/%s: v%s\n", runtime.GOOS, runtime.GOARCH, newRelease.Version())
@@ -110,7 +110,7 @@ func (upgrade *UpgradeCommand) upgrade(checkOnly bool) error {
 
 	err = commons.SelfUpgrade(newRelease)
 	if err != nil {
-		return xerrors.Errorf("failed to upgrade to new release: %w", err)
+		return errors.Wrapf(err, "failed to upgrade to new release")
 	}
 
 	commons.Printf("Upgraded successfully! [%s => v%s]\n", myVersion, newRelease.Version())

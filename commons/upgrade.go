@@ -5,9 +5,9 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/cockroachdb/errors"
 	selfupdate "github.com/creativeprojects/go-selfupdate"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/xerrors"
 )
 
 func CheckNewRelease() (*selfupdate.Release, error) {
@@ -20,11 +20,11 @@ func CheckNewRelease() (*selfupdate.Release, error) {
 
 	latest, found, err := selfupdate.DetectLatest(context.Background(), selfupdate.ParseSlug(mdRepoPackagePath))
 	if err != nil {
-		return nil, xerrors.Errorf("error occurred while detecting version: %w", err)
+		return nil, errors.Wrapf(err, "error occurred while detecting version")
 	}
 
 	if !found {
-		return nil, xerrors.Errorf("latest version for %s/%s is not found from github repository %q", runtime.GOOS, runtime.GOARCH, mdRepoPackagePath)
+		return nil, errors.Errorf("latest version for %s/%s is not found from github repository %q", runtime.GOOS, runtime.GOARCH, mdRepoPackagePath)
 	}
 
 	return latest, nil
@@ -40,11 +40,11 @@ func SelfUpgrade(release *selfupdate.Release) error {
 
 	exe, err := os.Executable()
 	if err != nil {
-		return xerrors.New("failed to locate executable path")
+		return errors.Errorf("failed to locate executable path")
 	}
 
 	if err := selfupdate.UpdateTo(context.Background(), release.AssetURL, release.AssetName, exe); err != nil {
-		return xerrors.Errorf("error occurred while updating binary: %w", err)
+		return errors.Wrapf(err, "error occurred while updating binary")
 	}
 
 	logger.Infof("updated to version v%s successfully", release.Version())

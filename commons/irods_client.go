@@ -1,10 +1,10 @@
 package commons
 
 import (
+	"github.com/cockroachdb/errors"
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_conn "github.com/cyverse/go-irodsclient/irods/connection"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
-	"golang.org/x/xerrors"
 )
 
 // GetIRODSFSClient returns a file system client
@@ -43,12 +43,12 @@ func GetIRODSConnection(account *irodsclient_types.IRODSAccount) (*irodsclient_c
 
 	conn, err := irodsclient_conn.NewIRODSConnection(account, &connConfig)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to create a connection: %w", err)
+		return nil, errors.Wrapf(err, "failed to create a connection")
 	}
 
 	err = conn.Connect()
 	if err != nil {
-		return nil, xerrors.Errorf("failed to connect: %w", err)
+		return nil, errors.Wrapf(err, "failed to connect")
 	}
 
 	return conn, nil

@@ -4,8 +4,8 @@ import (
 	"io"
 	"os"
 
+	"github.com/cockroachdb/errors"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
-	"golang.org/x/xerrors"
 )
 
 var (
@@ -76,12 +76,12 @@ func InputMissingFieldsFromStdin() error {
 	// read from stdin
 	stdinBytes, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		return xerrors.Errorf("failed to read missing config values from stdin: %w", err)
+		return errors.Wrapf(err, "failed to read missing config values from stdin")
 	}
 
 	configTypeIn, err := NewConfigTypeInFromYAML(stdinBytes)
 	if err != nil {
-		return xerrors.Errorf("failed to read missing config values: %w", err)
+		return errors.Wrapf(err, "failed to read missing config values")
 	}
 
 	appConfig.TicketString = configTypeIn.TicketString

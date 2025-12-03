@@ -111,8 +111,8 @@ func isAsciiString(str string) bool {
 
 func GetMDRepoTicketStringFromToken(serviceURL string, token string) (string, error) {
 	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"function": "GetMDRepoTicketStringFromToken",
+		"service_url": serviceURL,
+		"token":       token,
 	})
 
 	apiURL := mdRepoURL + mdRepoGetTicketApi

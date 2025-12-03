@@ -249,9 +249,9 @@ func (get *GetCommand) ensureTargetIsDir(targetPath string) error {
 
 func (get *GetCommand) getOne(mdRepoTicket *commons.MDRepoTicket, targetPath string) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "subcmd",
-		"struct":   "GetCommand",
-		"function": "getOne",
+		"irods_data_path": mdRepoTicket.IRODSDataPath,
+		"irods_ticket":    mdRepoTicket.IRODSTicket,
+		"targetPath":      targetPath,
 	})
 
 	// run
@@ -278,9 +278,11 @@ func (get *GetCommand) getOne(mdRepoTicket *commons.MDRepoTicket, targetPath str
 
 func (get *GetCommand) scheduleGet(mdRepoTicket *commons.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string, resume bool) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "subcmd",
-		"struct":   "GetCommand",
-		"function": "scheduleGet",
+		"irods_data_path": mdRepoTicket.IRODSDataPath,
+		"irods_ticket":    mdRepoTicket.IRODSTicket,
+		"source_path":     sourceEntry.Path,
+		"target_path":     targetPath,
+		"resume":          resume,
 	})
 
 	threadsRequired := get.calculateThreadForTransferJob(sourceEntry.Size)
@@ -359,9 +361,10 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *commons.MDRepoTicket, sourceEnt
 
 func (get *GetCommand) getFile(mdRepoTicket *commons.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "subcmd",
-		"struct":   "GetCommand",
-		"function": "getFile",
+		"irods_data_path": mdRepoTicket.IRODSDataPath,
+		"irods_ticket":    mdRepoTicket.IRODSTicket,
+		"source_path":     sourceEntry.Path,
+		"target_path":     targetPath,
 	})
 
 	commons.MarkLocalPathMap(get.updatedPathMap, targetPath)
@@ -426,9 +429,10 @@ func (get *GetCommand) getFile(mdRepoTicket *commons.MDRepoTicket, sourceEntry *
 
 func (get *GetCommand) getDir(mdRepoTicket *commons.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, targetPath string) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "subcmd",
-		"struct":   "GetCommand",
-		"function": "getDir",
+		"irods_data_path": mdRepoTicket.IRODSDataPath,
+		"irods_ticket":    mdRepoTicket.IRODSTicket,
+		"source_path":     sourceEntry.Path,
+		"target_path":     targetPath,
 	})
 
 	logger.Debugf("downloading a directory %q to %q", sourceEntry.Path, targetPath)

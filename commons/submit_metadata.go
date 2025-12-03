@@ -116,11 +116,7 @@ func (meta *MDRepoSubmitMetadata) hasLocalFile(filePath string) bool {
 }
 
 func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
-	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"struct":   "MDRepoSubmitMetadata",
-		"function": "ValidateFiles",
-	})
+	logger := log.WithFields(log.Fields{})
 
 	invalidSubmitMetadataError := &InvalidSubmitMetadataError{}
 
@@ -206,8 +202,9 @@ func (meta *MDRepoSubmitMetadata) GetFiles() []string {
 
 func VerifySubmitMetadataViaServer(sourcePaths []string, serviceURL string, token string) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"function": "VerifySubmitMetadataViaServer",
+		"source_paths": sourcePaths,
+		"service_url":  serviceURL,
+		"token":        token,
 	})
 
 	apiURL := mdRepoURL + mdRepoVerifyMetadataApi

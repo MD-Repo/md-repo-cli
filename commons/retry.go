@@ -12,8 +12,8 @@ import (
 
 func RunWithRetry(retry int, retryInterval int) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"function": "RunWithRetry",
+		"retry":          retry,
+		"retry_interval": retryInterval,
 	})
 
 	var err error

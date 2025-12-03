@@ -156,8 +156,7 @@ func GetParentIRODSDirs(p string) []string {
 // GetParentLocalDirs returns all parent dirs
 func GetParentLocalDirs(p string) []string {
 	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"function": "GetParentLocalDirs",
+		"local_path": p,
 	})
 
 	parents := []string{}

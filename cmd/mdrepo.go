@@ -34,10 +34,7 @@ func Execute() error {
 }
 
 func processCommand(command *cobra.Command, args []string) error {
-	logger := log.WithFields(log.Fields{
-		"package":  "main",
-		"function": "processCommand",
-	})
+	logger := log.WithFields(log.Fields{})
 
 	cont, err := flag.ProcessCommonFlags(command)
 	if err != nil {
@@ -62,13 +59,12 @@ func main() {
 		FullTimestamp:   true,
 	})
 
+	log.SetReportCaller(true)
+
 	log.SetLevel(log.FatalLevel)
 	log.SetOutput(commons.GetTerminalWriter())
 
-	logger := log.WithFields(log.Fields{
-		"package":  "main",
-		"function": "main",
-	})
+	logger := log.WithFields(log.Fields{})
 
 	// attach common flags
 	flag.SetCommonFlags(rootCmd)
@@ -296,10 +292,7 @@ func printWebdavError(url string, errorCode int) {
 }
 
 func upgrade() error {
-	logger := log.WithFields(log.Fields{
-		"package":  "main",
-		"function": "upgrade",
-	})
+	logger := log.WithFields(log.Fields{})
 
 	myVersion := commons.GetClientVersion()
 	logger.Debugf("Current client version installed: %s\n", myVersion)

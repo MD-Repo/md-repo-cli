@@ -74,9 +74,8 @@ func (upgrade *UpgradeCommand) Process() error {
 
 func (upgrade *UpgradeCommand) upgrade(silent bool, checkOnly bool) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"struct":   "UpgradeCommand",
-		"function": "upgrade",
+		"silent":     silent,
+		"check_only": checkOnly,
 	})
 
 	myVersion := commons.GetClientVersion()

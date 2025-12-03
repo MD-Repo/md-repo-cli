@@ -105,11 +105,7 @@ func NewSubmitCommand(command *cobra.Command, args []string) (*SubmitCommand, er
 }
 
 func (submit *SubmitCommand) Process() error {
-	logger := log.WithFields(log.Fields{
-		"package":  "subcmd",
-		"struct":   "SubmitCommand",
-		"function": "Process",
-	})
+	logger := log.WithFields(log.Fields{})
 
 	cont, err := flag.ProcessCommonFlags(submit.command)
 	if err != nil {
@@ -455,9 +451,10 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 
 func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, sourcePath string, targetPath string) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "subcmd",
-		"struct":   "SubmitCommand",
-		"function": "submitOne",
+		"irods_data_path": mdRepoTicket.IRODSDataPath,
+		"irods_ticket":    mdRepoTicket.IRODSTicket,
+		"source_path":     sourcePath,
+		"target_path":     targetPath,
 	})
 
 	logger.Debugf("submit %q to %q (ticket: %q)", sourcePath, targetPath, mdRepoTicket.IRODSTicket)
@@ -509,9 +506,9 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 
 func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath string, targetRootPath string, targetPath string) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "subcmd",
-		"struct":   "SubmitCommand",
-		"function": "scheduleSubmit",
+		"source_path":      sourcePath,
+		"target_root_path": targetRootPath,
+		"target_path":      targetPath,
 	})
 
 	threadsRequired := submit.calculateThreadForTransferJob(sourceStat.Size())
@@ -594,9 +591,9 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 
 func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath string, targetRootPath string, targetPath string) error {
 	logger := log.WithFields(log.Fields{
-		"package":  "subcmd",
-		"struct":   "SubmitCommand",
-		"function": "submitFile",
+		"source_path":      sourcePath,
+		"target_root_path": targetRootPath,
+		"target_path":      targetPath,
 	})
 
 	commons.MarkIRODSPathMap(submit.updatedPathMap, targetPath)

@@ -45,8 +45,9 @@ func GetWebDavError(url string, err error) error {
 
 func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, ticket string, callback irodsclient_common.TransferTrackerCallback) (*irodsclient_fs.FileTransferResult, error) {
 	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"function": "DownloadFileWebDAV",
+		"irods_source_path": sourceEntry.Path,
+		"local_path":        localPath,
+		"ticket":            ticket,
 	})
 
 	irodsSrcPath := irodsclient_util.GetCorrectIRODSPath(sourceEntry.Path)

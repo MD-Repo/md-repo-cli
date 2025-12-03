@@ -148,11 +148,7 @@ func (manager *ParallelJobManager) DoneScheduling() {
 }
 
 func (manager *ParallelJobManager) Wait() error {
-	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"struct":   "ParallelJobManager",
-		"function": "Wait",
-	})
+	logger := log.WithFields(log.Fields{})
 
 	logger.Debug("waiting schedule-wait")
 	manager.scheduleWait.Wait()
@@ -222,11 +218,7 @@ func (manager *ParallelJobManager) startProgress() {
 }
 
 func (manager *ParallelJobManager) endProgress() {
-	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"struct":   "ParallelJobManager",
-		"function": "endProgress",
-	})
+	logger := log.WithFields(log.Fields{})
 
 	logger.Debugf("ending progress")
 
@@ -256,11 +248,7 @@ func (manager *ParallelJobManager) endProgress() {
 }
 
 func (manager *ParallelJobManager) Start() {
-	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"struct":   "ParallelJobManager",
-		"function": "Start",
-	})
+	logger := log.WithFields(log.Fields{})
 
 	manager.startProgress()
 

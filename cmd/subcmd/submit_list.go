@@ -68,11 +68,7 @@ func NewSubmitListCommand(command *cobra.Command, args []string) (*SubmitListCom
 }
 
 func (submitls *SubmitListCommand) Process() error {
-	logger := log.WithFields(log.Fields{
-		"package":  "subcmd",
-		"struct":   "SubmitListCommand",
-		"function": "Process",
-	})
+	logger := log.WithFields(log.Fields{})
 
 	cont, err := flag.ProcessCommonFlags(submitls.command)
 	if err != nil {
@@ -229,11 +225,7 @@ func (submitls *SubmitListCommand) catStatusFile(sourcePath string) error {
 }
 
 func (submitls *SubmitListCommand) getPrettyStatusFileJSON(jsonBytes []byte) string {
-	logger := log.WithFields(log.Fields{
-		"package":  "subcmd",
-		"struct":   "SubmitListCommand",
-		"function": "getPrettyStatusFileJSON",
-	})
+	logger := log.WithFields(log.Fields{})
 
 	prettyJson := string(jsonBytes)
 

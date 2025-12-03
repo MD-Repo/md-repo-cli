@@ -7,17 +7,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	selfupdate "github.com/creativeprojects/go-selfupdate"
-	log "github.com/sirupsen/logrus"
 )
 
 func CheckNewRelease() (*selfupdate.Release, error) {
-	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"function": "CheckNewVersion",
-	})
-
-	logger.Infof("checking latest version for %s/%s", runtime.GOOS, runtime.GOARCH)
-
 	latest, found, err := selfupdate.DetectLatest(context.Background(), selfupdate.ParseSlug(mdRepoPackagePath))
 	if err != nil {
 		return nil, errors.Wrapf(err, "error occurred while detecting version")
@@ -31,13 +23,6 @@ func CheckNewRelease() (*selfupdate.Release, error) {
 }
 
 func SelfUpgrade(release *selfupdate.Release) error {
-	logger := log.WithFields(log.Fields{
-		"package":  "commons",
-		"function": "SelfUpgrade",
-	})
-
-	logger.Infof("updating to version v%s, url=%s, name=%s", release.Version(), release.AssetURL, release.AssetName)
-
 	exe, err := os.Executable()
 	if err != nil {
 		return errors.Errorf("failed to locate executable path")
@@ -47,6 +32,5 @@ func SelfUpgrade(release *selfupdate.Release) error {
 		return errors.Wrapf(err, "error occurred while updating binary")
 	}
 
-	logger.Infof("updated to version v%s successfully", release.Version())
 	return nil
 }

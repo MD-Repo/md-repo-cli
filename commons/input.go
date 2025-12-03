@@ -32,13 +32,19 @@ func Input(msg string) string {
 
 // InputYN inputs Y or N
 // true for Y, false for N
-func InputYN(msg string) bool {
+func InputYN(msg string, showAll bool) bool {
 	if selectedAll {
 		return true
 	}
 
 	for {
-		inputString := Input(fmt.Sprintf("%s [yes(y)/no(n)/all(a)]", msg))
+		inputString := ""
+		if showAll {
+			inputString = Input(fmt.Sprintf("%s [yes(y)/no(n)/all(a)]", msg))
+		} else {
+			inputString = Input(fmt.Sprintf("%s [yes(y)/no(n)]", msg))
+		}
+
 		inputString = strings.ToLower(inputString)
 		if inputString == "y" || inputString == "yes" || inputString == "true" {
 			return true

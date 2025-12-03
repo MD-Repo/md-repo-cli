@@ -1,13 +1,14 @@
 package main
 
 import (
-	"errors"
 	"net/http"
 	"os"
+	"runtime"
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/cmd/subcmd"
 	"github.com/MD-Repo/md-repo-cli/commons"
+	"github.com/cockroachdb/errors"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -234,6 +235,12 @@ func main() {
 			commons.PrintErrorf("Unexpected error!\nError Trace:\n  - %+v\n", err)
 		}
 
+		// check update
+		err = upgrade()
+		if err != nil {
+			logger.Errorf("Failed to check for updates: %+v", err)
+		}
+
 		os.Exit(1)
 	}
 }
@@ -286,4 +293,46 @@ func printWebdavError(url string, errorCode int) {
 		commons.PrintErrorf("Your IP address might be blocked.\nVisit 'https://unblockme.cyverse.org' to unblock your IP address.\nPlease contact us at 'help@mdrepo.org' if it did not help.\n")
 		return
 	}
+}
+
+func upgrade() error {
+	logger := log.WithFields(log.Fields{
+		"package":  "main",
+		"function": "upgrade",
+	})
+
+	myVersion := commons.GetClientVersion()
+	logger.Debugf("Current client version installed: %s\n", myVersion)
+
+	newRelease, err := commons.CheckNewRelease()
+	if err != nil {
+		return errors.Wrapf(err, "failed to check new release")
+	}
+
+	logger.Debugf("Latest release version available for %s/%s: v%s\n", runtime.GOOS, runtime.GOARCH, newRelease.Version())
+	logger.Debugf("Latest release URL: %s\n", newRelease.URL)
+
+	if commons.HasNewRelease(myVersion, newRelease.Version()) {
+		logger.Infof("Found a new version v%s available\n", newRelease.Version())
+		commons.Printf("Found a new version v%s available\n", newRelease.Version())
+	} else {
+		logger.Debugf("Current client version installed is up-to-date [%s]\n", myVersion)
+		return nil
+	}
+
+	// ask update
+	upgrade := commons.InputYN("Do you want to upgrade to the latest version?", false)
+	if !upgrade {
+		return nil
+	}
+
+	commons.Printf("Upgrading to the latest version v%s\n", newRelease.Version())
+
+	err = commons.SelfUpgrade(newRelease)
+	if err != nil {
+		return errors.Wrapf(err, "failed to upgrade to the new release")
+	}
+
+	commons.Printf("Upgrade from %s to v%s has done successfully!\n", myVersion, newRelease.Version())
+	return nil
 }

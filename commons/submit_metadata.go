@@ -190,7 +190,10 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 
 	maxSimulationSize := GetMaxSimulationSubmissionSize()
 	if totalFileSize > maxSimulationSize {
-		newErr := errors.Errorf("total size of each simulation must not exceed %d bytes, current %d", maxSimulationSize, totalFileSize)
+		totalFileSizeString := ToSizeString(uint64(totalFileSize))
+		maxSimulationSizeString := ToSizeString(uint64(maxSimulationSize))
+
+		newErr := errors.Errorf("total size of each simulation must not exceed %d (%d bytes), current %d (%d bytes)", maxSimulationSizeString, maxSimulationSize, totalFileSizeString, totalFileSize)
 		logger.Error(newErr)
 		invalidSubmitMetadataError.Add(newErr)
 	}

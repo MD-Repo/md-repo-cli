@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/dustin/go-humanize"
 )
 
 const (
@@ -18,40 +19,17 @@ const (
 	Day    int = Hour * 24
 )
 
-func ParseSize(size string) (int64, error) {
-	size = strings.TrimSpace(size)
-	size = strings.ToUpper(size)
-	size = strings.TrimSuffix(size, "B")
-
-	sizeNum := int64(0)
-	var err error
-
-	switch size[len(size)-1] {
-	case 'K', 'M', 'G', 'T':
-		sizeNum, err = strconv.ParseInt(size[:len(size)-1], 10, 64)
-		if err != nil {
-			return 0, errors.Wrapf(err, "failed to convert string %q to int", size)
-		}
-	default:
-		sizeNum, err = strconv.ParseInt(size, 10, 64)
-		if err != nil {
-			return 0, errors.Wrapf(err, "failed to convert string %q to int", size)
-		}
-		return sizeNum, nil
+func ParseSize(size string) (uint64, error) {
+	sizeNum, err := humanize.ParseBytes(size)
+	if err != nil {
+		return 0, errors.Wrapf(err, "failed to parse size string %q to uint64", size)
 	}
 
-	switch size[len(size)-1] {
-	case 'K':
-		return sizeNum * KiloBytes, nil
-	case 'M':
-		return sizeNum * MegaBytes, nil
-	case 'G':
-		return sizeNum * GigaBytes, nil
-	case 'T':
-		return sizeNum * TeraBytes, nil
-	default:
-		return sizeNum, nil
-	}
+	return sizeNum, nil
+}
+
+func ToSizeString(size uint64) string {
+	return humanize.IBytes(size)
 }
 
 func ParseTime(t string) (int, error) {

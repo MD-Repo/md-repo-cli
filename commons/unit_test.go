@@ -15,27 +15,27 @@ func testSize(t *testing.T) {
 	s1 := "256b"
 	s1b, err := ParseSize(s1)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(256), s1b)
+	assert.Equal(t, uint64(256), s1b)
 
 	s2 := "256"
 	s2b, err := ParseSize(s2)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(256), s2b)
+	assert.Equal(t, uint64(256), s2b)
 
-	s3 := "256k"
+	s3 := "256ki"
 	s3b, err := ParseSize(s3)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(256*1024), s3b)
+	assert.Equal(t, uint64(256*1024), s3b)
 
-	s4 := "256kb"
+	s4 := "256kib"
 	s4b, err := ParseSize(s4)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(256*1024), s4b)
+	assert.Equal(t, uint64(256*1024), s4b)
 
-	s5 := "256m"
+	s5 := "256mi"
 	s5b, err := ParseSize(s5)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(256*1024*1024), s5b)
+	assert.Equal(t, uint64(256*1024*1024), s5b)
 
 	s6 := "256x"
 	_, err = ParseSize(s6)

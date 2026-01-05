@@ -51,8 +51,10 @@ func SetParallelTransferFlags(command *cobra.Command, hideParallelConfig bool, h
 }
 
 func GetParallelTransferFlagValues() *ParallelTransferFlagValues {
-	size, _ := commons.ParseSize(parallelTransferFlagValues.tcpBufferSizeInput)
-	parallelTransferFlagValues.TCPBufferSize = int(size)
+	size, err := commons.ParseSize(parallelTransferFlagValues.tcpBufferSizeInput)
+	if err == nil {
+		parallelTransferFlagValues.TCPBufferSize = int(size)
+	}
 
 	if parallelTransferFlagValues.ThreadNumber < 1 {
 		parallelTransferFlagValues.ThreadNumber = 1

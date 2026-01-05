@@ -13,7 +13,7 @@ const (
 	FilesystemTimeout               irodsclient_types.Duration = irodsclient_types.Duration(10 * time.Minute)
 	transferThreadNumDefault        int                        = 5
 	transferThreadNumPerFileDefault int                        = 5
-	tcpBufferSizeStringDefault      string                     = "1MB"
+	tcpBufferSizeStringDefault      string                     = "1MiB"
 
 	// iRODS configuration
 	// Prod
@@ -36,7 +36,7 @@ const (
 	submissionStatusFilename   string = "mdrepo-submission.%s.json"
 	SubmissionMetadataFilename string = "mdrepo-metadata.toml"
 
-	MaxSimulationSubmissionSize string = "40GB"
+	MaxSimulationSubmissionSize string = "40GiB"
 )
 
 func GetDefaultTCPBufferSize() int {

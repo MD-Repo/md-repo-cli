@@ -22,6 +22,7 @@ const (
 	mdRepoZone            string = "iplant"
 	mdRepoUser            string = "md-uploader"
 	mdRepoUserPassword    string = ""
+	mdRepoHashScheme      string = "MD5"
 	mdRepoWebDAVServerURL string = "https://data.cyverse.org"
 	mdRepoWebDAVPrefix    string = "/dav-anon"
 

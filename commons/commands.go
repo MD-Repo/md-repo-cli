@@ -45,7 +45,7 @@ func GetAccount(ticket *MDRepoTicket) (*irodsclient_types.IRODSAccount, error) {
 		Password:                mdRepoUserPassword,
 		Ticket:                  ticketString,
 		DefaultResource:         "",
-		DefaultHashScheme:       irodsclient_types.HashSchemeDefault,
+		DefaultHashScheme:       mdRepoHashScheme,
 		PamTTL:                  1,
 		SSLConfiguration:        nil,
 	}, nil

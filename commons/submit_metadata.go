@@ -188,6 +188,32 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 		}
 	}
 
+	allFiles := []string{}
+	for _, v := range meta.RequiredFiles {
+		allFiles = append(allFiles, v)
+	}
+
+	for _, additionalFile := range meta.AdditionalFiles {
+		for k, v := range additionalFile {
+			if k == "additional_file_name" {
+				allFiles = append(allFiles, v)
+			}
+		}
+	}
+
+	allFilesMap := map[string]bool{}
+	for _, f := range allFiles {
+		if _, ok := allFilesMap[f]; ok {
+			// exist
+			newErr := errors.Errorf("the file %q is used multiple times in the metadata", f)
+			logger.Error(newErr)
+			invalidSubmitMetadataError.Add(newErr)
+		} else {
+			// add
+			allFilesMap[f] = true
+		}
+	}
+
 	maxSimulationSize := GetMaxSimulationSubmissionSize()
 	if totalFileSize > maxSimulationSize {
 		totalFileSizeString := ToSizeString(uint64(totalFileSize))

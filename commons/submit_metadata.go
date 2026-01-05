@@ -106,13 +106,13 @@ func (meta *MDRepoSubmitMetadata) GetOrcID() (string, error) {
 	return "", errors.Errorf("no ORCID found")
 }
 
-func (meta *MDRepoSubmitMetadata) hasLocalFile(filePath string) bool {
+func (meta *MDRepoSubmitMetadata) hasLocalFileAndReturnStat(filePath string) (bool, os.FileInfo) {
 	st, err := os.Stat(filePath)
 	if err == nil {
-		return !st.IsDir()
+		return !st.IsDir(), st
 	}
 
-	return !os.IsNotExist(err)
+	return !os.IsNotExist(err), nil
 }
 
 func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
@@ -123,6 +123,8 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 	hasTrajectory := false
 	hasStructure := false
 	hasTopology := false
+
+	totalFileSize := int64(0)
 
 	for filekey, file := range meta.RequiredFiles {
 		if filekey == "trajectory_file_name" {
@@ -137,7 +139,12 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 
 		absFilepath := filepath.Join(meta.SubmissionPath, file)
 
-		if !meta.hasLocalFile(absFilepath) {
+		fileExist, stat := meta.hasLocalFileAndReturnStat(absFilepath)
+		if fileExist {
+			if stat != nil {
+				totalFileSize += stat.Size()
+			}
+		} else {
 			newErr := errors.Errorf("required file %q described in metadata %q not found", filekey, absFilepath)
 			logger.Error(newErr)
 			invalidSubmitMetadataError.Add(newErr)
@@ -167,14 +174,25 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 			if filekey == "additional_file_name" {
 				absFilepath := filepath.Join(meta.SubmissionPath, file)
 
-				if !meta.hasLocalFile(absFilepath) {
-
+				fileExist, stat := meta.hasLocalFileAndReturnStat(absFilepath)
+				if fileExist {
+					if stat != nil {
+						totalFileSize += stat.Size()
+					}
+				} else {
 					newErr := errors.Errorf("additional file %q described in metadata %q not found", filekey, absFilepath)
 					logger.Error(newErr)
 					invalidSubmitMetadataError.Add(newErr)
 				}
 			}
 		}
+	}
+
+	maxSimulationSize := GetMaxSimulationSubmissionSize()
+	if totalFileSize > maxSimulationSize {
+		newErr := errors.Errorf("total size of each simulation must not exceed %d bytes, current %d", maxSimulationSize, totalFileSize)
+		logger.Error(newErr)
+		invalidSubmitMetadataError.Add(newErr)
 	}
 
 	if invalidSubmitMetadataError.ErrorLen() > 0 {

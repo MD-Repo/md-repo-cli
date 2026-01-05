@@ -35,6 +35,8 @@ const (
 
 	submissionStatusFilename   string = "mdrepo-submission.%s.json"
 	SubmissionMetadataFilename string = "mdrepo-metadata.toml"
+
+	MaxSimulationSubmissionSize string = "40GB"
 )
 
 func GetDefaultTCPBufferSize() int {
@@ -49,6 +51,12 @@ func GetDefaultTCPBufferSizeString() string {
 func GetDefaultTransferThreadNum() int {
 	return transferThreadNumDefault
 }
+
 func GetDefaultTransferThreadNumPerFile() int {
 	return transferThreadNumPerFileDefault
+}
+
+func GetMaxSimulationSubmissionSize() int64 {
+	size, _ := ParseSize(MaxSimulationSubmissionSize)
+	return int64(size)
 }

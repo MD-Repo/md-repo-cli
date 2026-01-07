@@ -1,7 +1,6 @@
 package commons
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -33,8 +32,8 @@ func (job *ParallelJob) GetManager() *ParallelJobManager {
 	return job.manager
 }
 
-func (job *ParallelJob) Progress(taskName string, processed int64, total int64, errored bool) {
-	job.manager.progress(job.name, taskName, processed, total, job.progressUnit, errored)
+func (job *ParallelJob) Progress(taskType string, processed int64, total int64, errored bool) {
+	job.manager.progress(taskType, job.name, processed, total, job.progressUnit, errored)
 }
 
 func (job *ParallelJob) Done() {
@@ -116,9 +115,9 @@ func (manager *ParallelJobManager) getNextJobIndex() int64 {
 	return idx
 }
 
-func (manager *ParallelJobManager) progress(name string, taskName string, processed int64, total int64, progressUnit progress.Units, errored bool) {
+func (manager *ParallelJobManager) progress(taskType string, taskName string, processed int64, total int64, progressUnit progress.Units, errored bool) {
 	if manager.progressTrackerCallback != nil {
-		manager.progressTrackerCallback(name, taskName, processed, total, progressUnit, errored)
+		manager.progressTrackerCallback(taskType, taskName, processed, total, progressUnit, errored)
 	}
 }
 
@@ -181,29 +180,18 @@ func (manager *ParallelJobManager) startProgress() {
 		go manager.progressWriter.Render()
 
 		// add progress tracker callback
-		manager.progressTrackerCallback = func(name string, taskName string, processed int64, total int64, progressUnit progress.Units, errored bool) {
+		manager.progressTrackerCallback = func(taskType string, taskName string, processed int64, total int64, progressUnit progress.Units, errored bool) {
 			manager.mutex.Lock()
 			defer manager.mutex.Unlock()
 
-			namePrefix := ""
-			switch taskName {
-			case "upload":
-				namePrefix = "Up"
-			case "download":
-				namePrefix = "Dn"
-			case "checksum":
-				namePrefix = "Ck"
-			}
-
-			trackerName := fmt.Sprintf("[%s] %s", namePrefix, name)
+			trackerName := GetTrackerName(taskType, taskName)
 
 			var tracker *progress.Tracker
 			if t, ok := manager.progressTrackers[trackerName]; !ok {
 				// created a new tracker if not exists
 				msg := trackerName
 				if !manager.showFullPath {
-					shortName := GetShortPathMessage(name, messageWidth)
-					msg = fmt.Sprintf("[%s] %s", namePrefix, shortName)
+					msg = GetShortTrackerMessage(taskType, taskName, messageWidth)
 				}
 
 				tracker = &progress.Tracker{

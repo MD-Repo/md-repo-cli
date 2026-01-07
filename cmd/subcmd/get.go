@@ -291,11 +291,11 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *commons.MDRepoTicket, sourceEnt
 		manager := job.GetManager()
 		fs := manager.GetFilesystem()
 
-		lastTaskName := "" // checksum then download
+		lastTaskType := "" // checksum then download
 
-		callbackGet := func(taskName string, processed int64, total int64) {
-			lastTaskName = taskName
-			job.Progress(taskName, processed, total, false)
+		callbackGet := func(taskType string, processed int64, total int64) {
+			lastTaskType = taskType
+			job.Progress(taskType, processed, total, false)
 		}
 
 		logger.Debugf("downloading a data object %q to %q", sourceEntry.Path, targetPath)
@@ -332,7 +332,7 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *commons.MDRepoTicket, sourceEnt
 		}
 
 		if downloadErr != nil {
-			job.Progress(lastTaskName, -1, sourceEntry.Size, true)
+			job.Progress(lastTaskType, -1, sourceEntry.Size, true)
 			return errors.Wrapf(downloadErr, "failed to download %q to %q", sourceEntry.Path, targetPath)
 		}
 

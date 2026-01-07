@@ -185,7 +185,17 @@ func (manager *ParallelJobManager) startProgress() {
 			manager.mutex.Lock()
 			defer manager.mutex.Unlock()
 
-			trackerName := fmt.Sprintf("[%s] %s", taskName, name)
+			namePrefix := ""
+			switch taskName {
+			case "upload":
+				namePrefix = "Up"
+			case "download":
+				namePrefix = "Dn"
+			case "checksum":
+				namePrefix = "Ck"
+			}
+
+			trackerName := fmt.Sprintf("[%s] %s", namePrefix, name)
 
 			var tracker *progress.Tracker
 			if t, ok := manager.progressTrackers[trackerName]; !ok {
@@ -193,7 +203,7 @@ func (manager *ParallelJobManager) startProgress() {
 				msg := trackerName
 				if !manager.showFullPath {
 					shortName := GetShortPathMessage(name, messageWidth)
-					msg = fmt.Sprintf("[%s] %s", taskName, shortName)
+					msg = fmt.Sprintf("[%s] %s", namePrefix, shortName)
 				}
 
 				tracker = &progress.Tracker{

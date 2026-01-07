@@ -9,7 +9,7 @@ import (
 	"golang.org/x/term"
 )
 
-type ProgressTrackerCallback func(name string, processed int64, total int64, unit progress.Units, errored bool)
+type ProgressTrackerCallback func(name string, taskName string, processed int64, total int64, unit progress.Units, errored bool)
 
 const (
 	progressTrackerLength        int = 20

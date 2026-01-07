@@ -526,11 +526,12 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 		manager := job.GetManager()
 		fs := manager.GetFilesystem()
 
-		callbackSubmit := func(taskName string, processed int64, total int64) {
-			job.Progress(processed, total, false)
-		}
+		lastTaskName := "" // checksum then upload
 
-		job.Progress(0, sourceStat.Size(), false)
+		callbackSubmit := func(taskName string, processed int64, total int64) {
+			lastTaskName = taskName
+			job.Progress(taskName, processed, total, false)
+		}
 
 		logger.Debugf("uploading a file %q to %q", sourcePath, targetPath)
 
@@ -552,18 +553,16 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 		}
 
 		if uploadErr != nil {
-			job.Progress(-1, sourceStat.Size(), true)
+			job.Progress(lastTaskName, -1, sourceStat.Size(), true)
 			return errors.Wrapf(uploadErr, "failed to upload %q to %q", sourcePath, targetPath)
 		}
 
 		err := submit.transferReportManager.AddTransfer(uploadResult, commons.TransferMethodPut, uploadErr, notes)
 		if err != nil {
-			job.Progress(-1, sourceStat.Size(), true)
 			return errors.Wrapf(err, "failed to add transfer report")
 		}
 
 		logger.Debugf("uploaded a file %q to %q", sourcePath, targetPath)
-		job.Progress(sourceStat.Size(), sourceStat.Size(), false)
 
 		job.Done()
 		return nil

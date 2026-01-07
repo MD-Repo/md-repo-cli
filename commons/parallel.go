@@ -1,6 +1,7 @@
 package commons
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -32,8 +33,8 @@ func (job *ParallelJob) GetManager() *ParallelJobManager {
 	return job.manager
 }
 
-func (job *ParallelJob) Progress(processed int64, total int64, errored bool) {
-	job.manager.progress(job.name, processed, total, job.progressUnit, errored)
+func (job *ParallelJob) Progress(taskName string, processed int64, total int64, errored bool) {
+	job.manager.progress(job.name, taskName, processed, total, job.progressUnit, errored)
 }
 
 func (job *ParallelJob) Done() {
@@ -115,9 +116,9 @@ func (manager *ParallelJobManager) getNextJobIndex() int64 {
 	return idx
 }
 
-func (manager *ParallelJobManager) progress(name string, processed int64, total int64, progressUnit progress.Units, errored bool) {
+func (manager *ParallelJobManager) progress(name string, taskName string, processed int64, total int64, progressUnit progress.Units, errored bool) {
 	if manager.progressTrackerCallback != nil {
-		manager.progressTrackerCallback(name, processed, total, progressUnit, errored)
+		manager.progressTrackerCallback(name, taskName, processed, total, progressUnit, errored)
 	}
 }
 
@@ -180,16 +181,19 @@ func (manager *ParallelJobManager) startProgress() {
 		go manager.progressWriter.Render()
 
 		// add progress tracker callback
-		manager.progressTrackerCallback = func(name string, processed int64, total int64, progressUnit progress.Units, errored bool) {
+		manager.progressTrackerCallback = func(name string, taskName string, processed int64, total int64, progressUnit progress.Units, errored bool) {
 			manager.mutex.Lock()
 			defer manager.mutex.Unlock()
 
+			trackerName := fmt.Sprintf("[%s] %s", taskName, name)
+
 			var tracker *progress.Tracker
-			if t, ok := manager.progressTrackers[name]; !ok {
+			if t, ok := manager.progressTrackers[trackerName]; !ok {
 				// created a new tracker if not exists
-				msg := name
+				msg := trackerName
 				if !manager.showFullPath {
-					msg = GetShortPathMessage(name, messageWidth)
+					shortName := GetShortPathMessage(name, messageWidth)
+					msg = fmt.Sprintf("[%s] %s", taskName, shortName)
 				}
 
 				tracker = &progress.Tracker{
@@ -199,7 +203,7 @@ func (manager *ParallelJobManager) startProgress() {
 				}
 
 				manager.progressWriter.AppendTracker(tracker)
-				manager.progressTrackers[name] = tracker
+				manager.progressTrackers[trackerName] = tracker
 			} else {
 				tracker = t
 			}

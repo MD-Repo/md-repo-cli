@@ -291,11 +291,12 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *commons.MDRepoTicket, sourceEnt
 		manager := job.GetManager()
 		fs := manager.GetFilesystem()
 
-		callbackGet := func(taskName string, processed int64, total int64) {
-			job.Progress(processed, total, false)
-		}
+		lastTaskName := "" // checksum then download
 
-		job.Progress(0, sourceEntry.Size, false)
+		callbackGet := func(taskName string, processed int64, total int64) {
+			lastTaskName = taskName
+			job.Progress(taskName, processed, total, false)
+		}
 
 		logger.Debugf("downloading a data object %q to %q", sourceEntry.Path, targetPath)
 
@@ -311,7 +312,6 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *commons.MDRepoTicket, sourceEnt
 		parentDownloadPath := filepath.Dir(downloadPath)
 		err := os.MkdirAll(parentDownloadPath, 0766)
 		if err != nil {
-			job.Progress(-1, sourceEntry.Size, true)
 			return errors.Wrapf(err, "failed to make a directory %q", parentDownloadPath)
 		}
 
@@ -332,18 +332,16 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *commons.MDRepoTicket, sourceEnt
 		}
 
 		if downloadErr != nil {
-			job.Progress(-1, sourceEntry.Size, true)
+			job.Progress(lastTaskName, -1, sourceEntry.Size, true)
 			return errors.Wrapf(downloadErr, "failed to download %q to %q", sourceEntry.Path, targetPath)
 		}
 
 		err = get.transferReportManager.AddTransfer(downloadResult, commons.TransferMethodGet, downloadErr, notes)
 		if err != nil {
-			job.Progress(-1, sourceEntry.Size, true)
 			return errors.Wrapf(err, "failed to add transfer report")
 		}
 
 		logger.Debugf("downloaded a data object %q to %q", sourceEntry.Path, targetPath)
-		job.Progress(sourceEntry.Size, sourceEntry.Size, false)
 
 		job.Done()
 		return nil

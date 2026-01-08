@@ -196,7 +196,7 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 
 	fileTransferResult.LocalSize = offset
 
-	localHash, err := calculateLocalFileHash(localPath, sourceEntry.CheckSumAlgorithm)
+	localHash, err := calculateLocalFileHash(localPath, sourceEntry.CheckSumAlgorithm, callback)
 	if err != nil {
 		return fileTransferResult, errors.Wrapf(err, "failed to calculate hash of local file %q with alg %s", localPath, sourceEntry.CheckSumAlgorithm)
 	}
@@ -213,9 +213,9 @@ func DownloadFileWebDAV(sourceEntry *irodsclient_fs.Entry, localPath string, tic
 	return fileTransferResult, nil
 }
 
-func calculateLocalFileHash(localPath string, algorithm irodsclient_types.ChecksumAlgorithm) ([]byte, error) {
+func calculateLocalFileHash(localPath string, algorithm irodsclient_types.ChecksumAlgorithm, processCallback irodsclient_common.TransferTrackerCallback) ([]byte, error) {
 	// verify checksum
-	hashBytes, err := irodsclient_util.HashLocalFile(localPath, string(algorithm), nil)
+	hashBytes, err := irodsclient_util.HashLocalFile(localPath, string(algorithm), processCallback)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get %q hash of %q", algorithm, localPath)
 	}

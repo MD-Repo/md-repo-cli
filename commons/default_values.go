@@ -13,7 +13,7 @@ const (
 	FilesystemTimeout               irodsclient_types.Duration = irodsclient_types.Duration(10 * time.Minute)
 	transferThreadNumDefault        int                        = 5
 	transferThreadNumPerFileDefault int                        = 5
-	tcpBufferSizeStringDefault      string                     = "1MiB"
+	tcpBufferSizeStringDefault      string                     = "0B"
 
 	// iRODS configuration
 	// Prod

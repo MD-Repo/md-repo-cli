@@ -17,10 +17,11 @@ type MDRepoSubmitMetadata struct {
 	MetadataFilePath string `toml:"-"`
 	SubmissionPath   string `toml:"-"`
 
-	Initial map[string]interface{} `toml:"initial"`
-
-	RequiredFiles   map[string]string   `toml:"required_files"`
-	AdditionalFiles []map[string]string `toml:"additional_files"`
+	LeadContributorOrcid string              `toml:"lead_contributor_orcid"`
+	TrajectoryFileName   string              `toml:"trajectory_file_name"`
+	StructureFileName    string              `toml:"structure_file_name"`
+	TopologyFileName     string              `toml:"topology_file_name"`
+	AdditionalFiles      []map[string]string `toml:"additional_files"`
 }
 
 type MDRepoVerifySubmitMetadataRequest struct {
@@ -60,7 +61,7 @@ func ParseSubmitMetadataFile(filePath string) (*MDRepoSubmitMetadata, error) {
 
 	_, err := toml.DecodeFile(filePath, &metadata)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse submission metadata at %q", filePath)
+		return nil, errors.Wrapf(err, "Failed to parse submission metadata at %q", filePath)
 	}
 
 	return &metadata, nil
@@ -95,15 +96,11 @@ func ParseSubmitMetadataString(metadataString string) (*MDRepoSubmitMetadata, er
 }
 
 func (meta *MDRepoSubmitMetadata) GetOrcID() (string, error) {
-	if leadContributorOrcID, ok := meta.Initial["lead_contributor_orcid"]; ok {
-		return leadContributorOrcID.(string), nil
+	if meta.LeadContributorOrcid != "" {
+		return meta.LeadContributorOrcid, nil
 	}
 
-	if primaryContributorOrcID, ok := meta.Initial["primary_contributor_orcid"]; ok {
-		return string(primaryContributorOrcID.(string)), nil
-	}
-
-	return "", errors.Errorf("no ORCID found")
+	return "", errors.Errorf("missing field 'lead_contributor_orcid'")
 }
 
 func (meta *MDRepoSubmitMetadata) hasLocalFileAndReturnStat(filePath string) (bool, os.FileInfo) {
@@ -126,23 +123,28 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 
 	totalFileSize := int64(0)
 
-	for filekey, file := range meta.RequiredFiles {
-		if filekey == "trajectory_file_name" {
-			hasTrajectory = true
-		}
-		if filekey == "structure_file_name" {
-			hasStructure = true
-		}
-		if filekey == "topology_file_name" {
-			hasTopology = true
-		}
+	var reqd_files = map[string]string{
+		"trajectory_file_name": meta.TrajectoryFileName,
+		"structure_file_name":  meta.StructureFileName,
+		"topology_file_name":   meta.TopologyFileName,
+	}
 
+	for filekey, file := range reqd_files {
 		absFilepath := filepath.Join(meta.SubmissionPath, file)
 
 		fileExist, stat := meta.hasLocalFileAndReturnStat(absFilepath)
 		if fileExist {
 			if stat != nil {
 				totalFileSize += stat.Size()
+				if filekey == "trajectory_file_name" {
+					hasTrajectory = true
+				}
+				if filekey == "structure_file_name" {
+					hasStructure = true
+				}
+				if filekey == "topology_file_name" {
+					hasTopology = true
+				}
 			}
 		} else {
 			newErr := errors.Errorf("required file %q described in metadata %q not found", filekey, absFilepath)
@@ -169,34 +171,27 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 		invalidSubmitMetadataError.Add(newErr)
 	}
 
+	allFiles := []string{}
+	for _, v := range reqd_files {
+		allFiles = append(allFiles, v)
+	}
+
 	for _, additionalFile := range meta.AdditionalFiles {
 		for filekey, file := range additionalFile {
-			if filekey == "additional_file_name" {
+			if filekey == "file_name" {
 				absFilepath := filepath.Join(meta.SubmissionPath, file)
 
 				fileExist, stat := meta.hasLocalFileAndReturnStat(absFilepath)
 				if fileExist {
 					if stat != nil {
 						totalFileSize += stat.Size()
+						allFiles = append(allFiles, file)
 					}
 				} else {
 					newErr := errors.Errorf("additional file %q described in metadata %q not found", filekey, absFilepath)
 					logger.Error(newErr)
 					invalidSubmitMetadataError.Add(newErr)
 				}
-			}
-		}
-	}
-
-	allFiles := []string{}
-	for _, v := range meta.RequiredFiles {
-		allFiles = append(allFiles, v)
-	}
-
-	for _, additionalFile := range meta.AdditionalFiles {
-		for k, v := range additionalFile {
-			if k == "additional_file_name" {
-				allFiles = append(allFiles, v)
 			}
 		}
 	}
@@ -232,14 +227,11 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 }
 
 func (meta *MDRepoSubmitMetadata) GetFiles() []string {
-	var files []string
-	for _, v := range meta.RequiredFiles {
-		files = append(files, v)
-	}
+	var files = []string{meta.TrajectoryFileName, meta.StructureFileName, meta.TopologyFileName}
 
 	for _, additionalFile := range meta.AdditionalFiles {
 		for k, v := range additionalFile {
-			if k == "additional_file_name" {
+			if k == "file_name" {
 				files = append(files, v)
 			}
 		}

@@ -109,7 +109,7 @@ func (submit *SubmitCommand) Process() error {
 
 	cont, err := flag.ProcessCommonFlags(submit.command)
 	if err != nil {
-		return errors.Wrapf(err, "failed to process common flags")
+		return errors.Wrapf(err, "Failed to process common flags")
 	}
 	if !cont {
 		return nil
@@ -129,12 +129,12 @@ func (submit *SubmitCommand) Process() error {
 	// handle local flags
 	_, err = commons.InputMissingFields()
 	if err != nil {
-		return errors.Wrapf(err, "failed to input missing fields")
+		return errors.Wrapf(err, "Failed to input missing fields")
 	}
 
 	validSourcePaths, invalidSourcePaths, invalidSourcePathsErrors, orcID, err := submit.scanSourcePaths(submit.submissionFlagValues.OrcID)
 	if err != nil {
-		return errors.Wrapf(err, "failed to scan source paths")
+		return errors.Wrapf(err, "Failed to scan source paths")
 	}
 
 	if !submit.retryFlagValues.RetryChild {
@@ -175,19 +175,19 @@ func (submit *SubmitCommand) Process() error {
 		// encrypt
 		tokenBytes, err := commons.Base64Decode(config.Token)
 		if err != nil {
-			return errors.Wrapf(err, "failed to decode token using BASE64")
+			return errors.Wrapf(err, "Failed to decode token using BASE64")
 		}
 
 		newToken, err := commons.HMACStringSHA224(tokenBytes, orcID)
 		if err != nil {
-			return errors.Wrapf(err, "failed to encrypt token using SHA3-224 HMAC")
+			return errors.Wrapf(err, "Failed to encrypt token using SHA3-224 HMAC")
 		}
 
 		logger.Debugf("encrypted token: %s", newToken)
 
 		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(submit.tokenFlagValues.ServiceURL, newToken)
 		if err != nil {
-			return errors.Wrapf(err, "failed to read ticket from token")
+			return errors.Wrapf(err, "Failed to read ticket from token")
 		}
 	}
 
@@ -199,12 +199,12 @@ func (submit *SubmitCommand) Process() error {
 	for _, sourcePath := range validSourcePaths {
 		metadata, err := commons.ParseSubmitMetadataDir(sourcePath)
 		if err != nil {
-			return errors.Wrapf(err, "failed to parse submit metadata in dir %q", sourcePath)
+			return errors.Wrapf(err, "Failed to parse submit metadata in dir %q", sourcePath)
 		}
 
 		err = metadata.ValidateFiles()
 		if err != nil {
-			return errors.Wrapf(err, "failed to validate local files listed in the metadata file %q", metadata.MetadataFilePath)
+			return errors.Wrapf(err, "Failed to validate local files listed in the metadata file %q", metadata.MetadataFilePath)
 		}
 	}
 
@@ -220,7 +220,7 @@ func (submit *SubmitCommand) Process() error {
 	if submit.retryFlagValues.RetryNumber > 0 && !submit.retryFlagValues.RetryChild {
 		err = commons.RunWithRetry(submit.retryFlagValues.RetryNumber, submit.retryFlagValues.RetryIntervalSeconds)
 		if err != nil {
-			return errors.Wrapf(err, "failed to run with retry %d", submit.retryFlagValues.RetryNumber)
+			return errors.Wrapf(err, "Failed to run with retry %d", submit.retryFlagValues.RetryNumber)
 		}
 		return nil
 	}
@@ -228,14 +228,14 @@ func (submit *SubmitCommand) Process() error {
 	// transfer report
 	submit.transferReportManager, err = commons.NewTransferReportManager(submit.transferReportFlagValues.Report, submit.transferReportFlagValues.ReportPath, submit.transferReportFlagValues.ReportToStdout)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create transfer report manager")
+		return errors.Wrapf(err, "Failed to create transfer report manager")
 	}
 	defer submit.transferReportManager.Release()
 
 	// get ticket
 	mdRepoTickets, err := commons.GetMDRepoTicketsFromString(config.TicketString)
 	if err != nil {
-		return errors.Wrapf(err, "failed to retrieve tickets")
+		return errors.Wrapf(err, "Failed to retrieve tickets")
 	}
 
 	if len(mdRepoTickets) != len(validSourcePaths) {
@@ -253,12 +253,12 @@ func (submit *SubmitCommand) Process() error {
 		// Create a file system
 		submit.account, err = commons.GetAccount(&mdRepoTicket)
 		if err != nil {
-			return errors.Wrapf(err, "failed to get iRODS Account")
+			return errors.Wrapf(err, "Failed to get iRODS Account")
 		}
 
 		submit.filesystem, err = commons.GetIRODSFSClientForLargeFileIO(submit.account, submit.maxConnectionNum, submit.parallelTransferFlagValues.TCPBufferSize)
 		if err != nil {
-			return errors.Wrapf(err, "failed to get iRODS FS Client")
+			return errors.Wrapf(err, "Failed to get iRODS FS Client")
 		}
 
 		// parallel job manager
@@ -276,7 +276,7 @@ func (submit *SubmitCommand) Process() error {
 			submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
 			submit.filesystem.Release()
 			submit.filesystem = nil
-			return errors.Wrapf(err, "failed to submit %q to %q", sourcePath, targetPath)
+			return errors.Wrapf(err, "Failed to submit %q to %q", sourcePath, targetPath)
 		}
 
 		// create a status file
@@ -285,7 +285,7 @@ func (submit *SubmitCommand) Process() error {
 		if err != nil {
 			submit.filesystem.Release()
 			submit.filesystem = nil
-			return errors.Wrapf(err, "failed to create status file on %q", targetPath)
+			return errors.Wrapf(err, "Failed to create status file on %q", targetPath)
 		}
 
 		// release parallel job manager
@@ -297,7 +297,7 @@ func (submit *SubmitCommand) Process() error {
 			submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
 			submit.filesystem.Release()
 			submit.filesystem = nil
-			return errors.Wrapf(err, "failed to perform parallel jobs")
+			return errors.Wrapf(err, "Failed to perform parallel jobs")
 		}
 
 		// status file
@@ -306,7 +306,7 @@ func (submit *SubmitCommand) Process() error {
 		if err != nil {
 			submit.filesystem.Release()
 			submit.filesystem = nil
-			return errors.Wrapf(err, "failed to create status file on %q", targetPath)
+			return errors.Wrapf(err, "Failed to create status file on %q", targetPath)
 		}
 
 		// done
@@ -328,7 +328,7 @@ func (submit *SubmitCommand) checkValidSourcePath(sourcePath string) error {
 			return errors.Join(err, irodsclient_types.NewFileNotFoundError(sourcePath))
 		}
 
-		return errors.Wrapf(err, "failed to stat source %q", sourcePath)
+		return errors.Wrapf(err, "Failed to stat source %q", sourcePath)
 	}
 
 	if !st.IsDir() {
@@ -343,7 +343,7 @@ func (submit *SubmitCommand) checkValidSourcePath(sourcePath string) error {
 
 	entries, err := os.ReadDir(sourcePath)
 	if err != nil {
-		return errors.Wrapf(err, "failed to readdir source %q", sourcePath)
+		return errors.Wrapf(err, "Failed to readdir source %q", sourcePath)
 	}
 
 	for _, entry := range entries {
@@ -388,7 +388,7 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 		// may have sub dirs?
 		dirEntries, readErr := os.ReadDir(sourcePath)
 		if readErr != nil {
-			return nil, nil, nil, "", errors.Wrapf(readErr, "failed to list source %q", sourcePath)
+			return nil, nil, nil, "", errors.Wrapf(readErr, "Failed to list source %q", sourcePath)
 		}
 
 		hasSubDirs := false
@@ -428,13 +428,15 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 	for _, validSourcePath := range validSourcePaths {
 		metadataPath := commons.GetSubmitMetadataPath(validSourcePath)
 		submitMetadata, err := commons.ParseSubmitMetadataFile(metadataPath)
+
 		if err != nil {
-			return nil, nil, nil, "", errors.Wrapf(err, "failed to parse metadata for %q", validSourcePath)
+			return nil, nil, nil, "", errors.Wrapf(err, "Failed to parse metadata for %q", validSourcePath)
 		}
 
 		myOrcID, err := submitMetadata.GetOrcID()
 		if err != nil {
-			return nil, nil, nil, "", errors.Wrapf(err, "failed to read ORC-ID from metadata for %q", validSourcePath)
+			return nil, nil, nil, "", 
+                errors.Wrapf(err, "Failed to parse %q", validSourcePath)
 		}
 
 		if len(orcIDFound) == 0 {
@@ -442,7 +444,7 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 		}
 
 		if orcIDFound != myOrcID {
-			return nil, nil, nil, "", errors.Errorf("Lead Contributor's ORC-ID mismatch for %q, expected %s, but got %s: %w", validSourcePath, orcIDFound, myOrcID, commons.InvalidOrcIDError)
+			return nil, nil, nil, "", errors.Errorf("Lead Contributor's ORCID mismatch for %q, expected %s, but got %s: %w", validSourcePath, orcIDFound, myOrcID, commons.InvalidOrcIDError)
 		}
 	}
 
@@ -465,7 +467,7 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 			return errors.Join(err, irodsclient_types.NewFileNotFoundError(sourcePath))
 		}
 
-		return errors.Wrapf(err, "failed to stat %q", sourcePath)
+		return errors.Wrapf(err, "Failed to stat %q", sourcePath)
 	}
 
 	targetRootPath := targetPath
@@ -478,7 +480,7 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 	// dir
 	metadata, err := commons.ParseSubmitMetadataDir(sourcePath)
 	if err != nil {
-		return errors.Wrapf(err, "failed to parse submit metadata in dir %q", sourcePath)
+		return errors.Wrapf(err, "Failed to parse submit metadata in dir %q", sourcePath)
 	}
 
 	sourceFiles := metadata.GetFiles()
@@ -499,7 +501,7 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 		sourceFileAbsPath := filepath.Join(metadata.SubmissionPath, sourceFile)
 		sourceFileStat, err := os.Stat(sourceFileAbsPath)
 		if err != nil {
-			return errors.Wrapf(err, "failed to stat source file %q", sourceFileAbsPath)
+			return errors.Wrapf(err, "Failed to stat source file %q", sourceFileAbsPath)
 		}
 
 		targetFilePath := path.Join(targetRootPath, sourceFile)
@@ -554,15 +556,15 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 
 		if uploadErr != nil {
 			job.Progress(lastTaskType, -1, sourceStat.Size(), true)
-			return errors.Wrapf(uploadErr, "failed to upload %q to %q", sourcePath, targetPath)
+			return errors.Wrapf(uploadErr, "Failed to upload %q to %q", sourcePath, targetPath)
 		}
 
 		err := submit.transferReportManager.AddTransfer(uploadResult, commons.TransferMethodPut, uploadErr, notes)
 		if err != nil {
-			return errors.Wrapf(err, "failed to add transfer report")
+			return errors.Wrapf(err, "Failed to add transfer report")
 		}
 
-		logger.Debugf("uploaded a file %q to %q", sourcePath, targetPath)
+		logger.Debugf("Uploaded a file %q to %q", sourcePath, targetPath)
 
 		job.Done()
 		return nil
@@ -571,7 +573,7 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 	// submit status file
 	hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5", nil)
 	if err != nil {
-		return errors.Wrapf(err, "failed to get hash for %q", sourcePath)
+		return errors.Wrapf(err, "Failed to get hash for %q", sourcePath)
 	}
 
 	targetRelPath := targetPath
@@ -589,7 +591,7 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 	// schedule
 	err = submit.parallelJobManager.Schedule(sourcePath, submitTask, threadsRequired, progress.UnitsBytes)
 	if err != nil {
-		return errors.Wrapf(err, "failed to schedule upload %q to %q", sourcePath, targetPath)
+		return errors.Wrapf(err, "Failed to schedule upload %q to %q", sourcePath, targetPath)
 	}
 
 	logger.Debugf("scheduled a file upload %q to %q", sourcePath, targetPath)
@@ -614,7 +616,7 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 			return submit.scheduleSubmit(sourceStat, sourcePath, targetRootPath, targetPath)
 		}
 
-		return errors.Wrapf(err, "failed to stat %q", targetPath)
+		return errors.Wrapf(err, "Failed to stat %q", targetPath)
 	}
 
 	// target exists
@@ -629,7 +631,7 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 			if len(targetEntry.CheckSum) > 0 {
 				localChecksum, err := irodsclient_util.HashLocalFile(sourcePath, string(targetEntry.CheckSumAlgorithm), nil)
 				if err != nil {
-					return errors.Wrapf(err, "failed to get hash for %q", sourcePath)
+					return errors.Wrapf(err, "Failed to get hash for %q", sourcePath)
 				}
 
 				if bytes.Equal(localChecksum, targetEntry.CheckSum) {
@@ -658,7 +660,7 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 					// add skipped status entry
 					hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5", nil)
 					if err != nil {
-						return errors.Wrapf(err, "failed to get hash for %q", sourcePath)
+						return errors.Wrapf(err, "Failed to get hash for %q", sourcePath)
 					}
 
 					targetRelPath := targetPath

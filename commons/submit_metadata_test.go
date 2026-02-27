@@ -12,64 +12,38 @@ func TestSubmitMetadata(t *testing.T) {
 
 func testReadSubmitMetadata(t *testing.T) {
 	metadata := `
-	ligands = [ ]
-	solvents = [ ]
-	papers = [ ]
-	contributors = [ ]
-	simulation_permissions = [ ]
-
-	[initial]
 	short_description = "test"
-	date = "2025-08-26"
 	lead_contributor_orcid = "0000-0001-7374-1561"
-	simulation_is_restricted = false
-
-	[software]
-	name = "test1"
-
-	[replicates]
-	replicate = nan
-	total_replicates = nan
-
-	[water]
-	is_present = false
-	density = nan
-	water_density_units = "g/m^3"
-
-	[[proteins]]
-	molecule_id_type = "Uniprot"
-	molecule_id = "x33433"
-
-	[forcefield]
-
-	[temperature]
-	temperature = 1_100
-
-	[protonation_method]
+	software_name = "test1"
+	replicate_id = "XXX"
+    pdb_id = "4u3n"
+    uniprot_ids = ["x33433",]
+	forcefield = "the force"
 	protonation_method = ""
-
-	[timestep_information]
-	integration_time_step = 100
-
-	[required_files]
+	temperature_kelvin = 1_100
+	integration_time_step_fs = 100
 	trajectory_file_name = "output.filtered.xtc"
 	structure_file_name = "filtered.pdb"
 	topology_file_name = "structure.prmtop"
 
-	[[additional_files]]
-	additional_file_type = "Input"
-	additional_file_name = "i1"
-	additional_file_description = "i1_desc"
+	[water]
+	density = nan
+	water_density_units = "g/m^3"
 
 	[[additional_files]]
-	additional_file_type = "Input"
-	additional_file_name = "i2"
-	additional_file_description = "i2_desc"
+	file_type = "Input"
+	file_name = "i1"
+	description = "i1_desc"
 
 	[[additional_files]]
-	additional_file_type = "Trajectory"
-	additional_file_name = "t1"
-	additional_file_description = "t1_desc"
+	file_type = "Input"
+	file_name = "i2"
+	description = "i2_desc"
+
+	[[additional_files]]
+	file_type = "Trajectory"
+	file_name = "t1"
+	description = "t1_desc"
 `
 
 	submitMetadata, err := ParseSubmitMetadataString(metadata)

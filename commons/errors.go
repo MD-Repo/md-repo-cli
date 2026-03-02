@@ -39,7 +39,8 @@ func (err *MDRepoServiceError) ToString() string {
 
 // IsMDRepoServiceError evaluates if the given error is MDRepoServiceError
 func IsMDRepoServiceError(err error) bool {
-	return errors.Is(err, &MDRepoServiceError{})
+	var mdRepoErr *MDRepoServiceError
+	return errors.As(err, &mdRepoErr)
 }
 
 type InvalidTicketError struct {
@@ -70,7 +71,8 @@ func (err *InvalidTicketError) ToString() string {
 
 // IsInvalidTicketError evaluates if the given error is InvalidTicketError
 func IsInvalidTicketError(err error) bool {
-	return errors.Is(err, &InvalidTicketError{})
+	var invalidTicketErr *InvalidTicketError
+	return errors.As(err, &invalidTicketErr)
 }
 
 type SimulationNoNotMatchingError struct {
@@ -108,7 +110,8 @@ func (err *SimulationNoNotMatchingError) ToString() string {
 
 // IsSimulationNoNotMatchingError evaluates if the given error is SimulationNoNotMatchingError
 func IsSimulationNoNotMatchingError(err error) bool {
-	return errors.Is(err, &SimulationNoNotMatchingError{})
+	var simulationNoNotMatchingErr *SimulationNoNotMatchingError
+	return errors.As(err, &simulationNoNotMatchingErr)
 }
 
 type NotDirError struct {
@@ -139,7 +142,8 @@ func (err *NotDirError) ToString() string {
 
 // IsNotDirError evaluates if the given error is NotDirError
 func IsNotDirError(err error) bool {
-	return errors.Is(err, &NotDirError{})
+	var notDirErr *NotDirError
+	return errors.As(err, &notDirErr)
 }
 
 type NotFileError struct {
@@ -170,7 +174,8 @@ func (err *NotFileError) ToString() string {
 
 // IsNotFileError evaluates if the given error is NotFileError
 func IsNotFileError(err error) bool {
-	return errors.Is(err, &NotFileError{})
+	var notFileErr *NotFileError
+	return errors.As(err, &notFileErr)
 }
 
 type InvalidSubmitMetadataError struct {
@@ -217,7 +222,8 @@ func (err *InvalidSubmitMetadataError) ToString() string {
 
 // IsInvalidSubmitMetadataError evaluates if the given error is InvalidSubmitMetadataError
 func IsInvalidSubmitMetadataError(err error) bool {
-	return errors.Is(err, &InvalidSubmitMetadataError{})
+	var invalidSubmitMetadataErr *InvalidSubmitMetadataError
+	return errors.As(err, &invalidSubmitMetadataErr)
 }
 
 type DialHTTPError struct {
@@ -248,7 +254,8 @@ func (err *DialHTTPError) ToString() string {
 
 // IsDialHTTPError evaluates if the given error is DialHTTPError
 func IsDialHTTPError(err error) bool {
-	return errors.Is(err, &DialHTTPError{})
+	var dialHTTPErr *DialHTTPError
+	return errors.As(err, &dialHTTPErr)
 }
 
 type WebDAVError struct {
@@ -281,5 +288,6 @@ func (err *WebDAVError) ToString() string {
 
 // IsWebDAVError evaluates if the given error is WebDAVError
 func IsWebDAVError(err error) bool {
-	return errors.Is(err, &WebDAVError{})
+	var webDAVErr *WebDAVError
+	return errors.As(err, &webDAVErr)
 }

@@ -68,6 +68,7 @@ func NewSubmitListCommand(command *cobra.Command, args []string) (*SubmitListCom
 }
 
 func (submitls *SubmitListCommand) Process() error {
+	fmt.Printf("submitls %s\n", commons.GetClientVersion())
 	logger := log.WithFields(log.Fields{})
 
 	cont, err := flag.ProcessCommonFlags(submitls.command)

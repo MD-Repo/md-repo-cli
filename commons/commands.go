@@ -91,7 +91,7 @@ func InputMissingFieldsFromStdin() error {
 
 // InputOrcID inputs ORCID
 func InputOrcID() string {
-	return Input("Input ORC-ID")
+	return Input("Input ORCID")
 }
 
 // InputSimulationNo inputs simulation no

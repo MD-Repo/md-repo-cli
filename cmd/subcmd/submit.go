@@ -26,6 +26,7 @@ import (
 var submitCmd = &cobra.Command{
 	Use:     "submit [data dirs] ...",
 	Short:   "Submit local data to MD-Repo",
+	Long:    fmt.Sprintf("Submit local data to MD-Repo (%s)", commons.GetClientVersion()),
 	Aliases: []string{"upload", "up", "put", "contribute"},
 	RunE:    processSubmitCommand,
 	Args:    cobra.MinimumNArgs(1),
@@ -105,6 +106,7 @@ func NewSubmitCommand(command *cobra.Command, args []string) (*SubmitCommand, er
 }
 
 func (submit *SubmitCommand) Process() error {
+	fmt.Printf("submit %s\n", commons.GetClientVersion())
 	logger := log.WithFields(log.Fields{})
 
 	cont, err := flag.ProcessCommonFlags(submit.command)

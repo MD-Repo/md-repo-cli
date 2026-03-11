@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"fmt"
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/cmd/subcmd"
@@ -17,7 +18,7 @@ import (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:           "mdrepo [subcommand]",
-	Short:         "MD-Repo command-line tool",
+	Short:         fmt.Sprintf("MD-Repo command-line tool (%s)", commons.GetClientVersion()),
 	RunE:          processCommand,
 	SilenceUsage:  true,
 	SilenceErrors: true,

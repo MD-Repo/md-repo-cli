@@ -94,7 +94,7 @@ func NewSimulationNoNotMatchingError(valid []string, invalid []string, invalidEr
 
 // Error returns error message
 func (err *SimulationNoNotMatchingError) Error() string {
-	return fmt.Sprintf("the number of simulations typed (%d) does not match the number of simulations found (%d)", err.Expected, len(err.ValidSimulationPaths))
+	return fmt.Sprintf("the number of simulations indicated (%d) does not match the number of simulations found (%d)", err.Expected, len(err.ValidSimulationPaths))
 }
 
 // Is tests type of error

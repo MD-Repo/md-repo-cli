@@ -24,7 +24,7 @@ var getCmd = &cobra.Command{
 	Use:     "get [local dir]",
 	Short:   "Download MD-Repo data to a local directory",
 	Aliases: []string{"download", "down"},
-	Long:    `This downloads MD-Repo data to the given local directory.`,
+	Long:    fmt.Sprintf(`This downloads MD-Repo data to the given local directory (%s).`, commons.GetClientVersion()),
 	RunE:    processGetCommand,
 	Args:    cobra.MaximumNArgs(1),
 }
@@ -103,6 +103,7 @@ func NewGetCommand(command *cobra.Command, args []string) (*GetCommand, error) {
 }
 
 func (get *GetCommand) Process() error {
+	fmt.Printf("get %s\n", commons.GetClientVersion())
 	cont, err := flag.ProcessCommonFlags(get.command)
 	if err != nil {
 		return errors.Wrapf(err, "failed to process common flags")

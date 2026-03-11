@@ -1,6 +1,7 @@
 package subcmd
 
 import (
+	"fmt"
 	"runtime"
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
@@ -13,7 +14,7 @@ import (
 var upgradeCmd = &cobra.Command{
 	Use:   "upgrade",
 	Short: "Upgrade MD-Repo command-line tool to the latest available version",
-	Long:  `This command upgrades MD-Repo command-line tool to the latest version available.`,
+	Long:  fmt.Sprintf(`This command upgrades MD-Repo command-line tool to the latest version available (%s).`, commons.GetClientVersion()),
 	RunE:  processUpgradeCommand,
 	Args:  cobra.NoArgs,
 }

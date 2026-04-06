@@ -211,7 +211,7 @@ func (submit *SubmitCommand) Process() error {
 	}
 
 	// verify metadata via server
-	invalidErr := commons.VerifySubmitMetadataViaServer(validSourcePaths, submit.tokenFlagValues.ServiceURL, config.Token)
+	invalidErr := commons.VerifySubmitMetadataViaServer(validSourcePaths, submit.tokenFlagValues.ServiceURL, config.Token, submit.submissionFlagValues.NoID)
 	if invalidErr != nil {
 		return invalidErr
 	} else {

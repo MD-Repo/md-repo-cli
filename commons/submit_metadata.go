@@ -28,6 +28,7 @@ type MDRepoVerifySubmitMetadataRequest struct {
 	LocalDataDirPath string `json:"directory"`
 	MetadataTOML     string `json:"toml"`
 	Token            string `json:"token"`
+	NoID             bool   `json:"no_id"`
 }
 
 type MDRepoVerifySubmitMetadataResponse struct {
@@ -239,7 +240,7 @@ func (meta *MDRepoSubmitMetadata) GetFiles() []string {
 	return files
 }
 
-func VerifySubmitMetadataViaServer(sourcePaths []string, serviceURL string, token string) error {
+func VerifySubmitMetadataViaServer(sourcePaths []string, serviceURL string, token string, noID bool) error {
 	logger := log.WithFields(log.Fields{
 		"source_paths": sourcePaths,
 		"service_url":  serviceURL,
@@ -274,6 +275,7 @@ func VerifySubmitMetadataViaServer(sourcePaths []string, serviceURL string, toke
 			LocalDataDirPath: sourcePath,
 			MetadataTOML:     string(metadataBytes),
 			Token:            token,
+			NoID:             noID,
 		}
 
 		verifyRequests = append(verifyRequests, verifyRequest)

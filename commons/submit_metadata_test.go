@@ -22,7 +22,7 @@ func testReadSubmitMetadata(t *testing.T) {
 	protonation_method = ""
 	temperature_kelvin = 1_100
 	integration_time_step_fs = 100
-	trajectory_file_name = "output.filtered.xtc"
+	trajectory_file_names = ["output.filtered.xtc"]
 	structure_file_name = "filtered.pdb"
 	topology_file_name = "structure.prmtop"
 

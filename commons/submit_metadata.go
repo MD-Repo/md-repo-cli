@@ -18,7 +18,7 @@ type MDRepoSubmitMetadata struct {
 	SubmissionPath   string `toml:"-"`
 
 	LeadContributorOrcid string              `toml:"lead_contributor_orcid"`
-	TrajectoryFileName   string              `toml:"trajectory_file_name"`
+	TrajectoryFileNames  []string            `toml:"trajectory_file_names"`
 	StructureFileName    string              `toml:"structure_file_name"`
 	TopologyFileName     string              `toml:"topology_file_name"`
 	AdditionalFiles      []map[string]string `toml:"additional_files"`
@@ -118,16 +118,33 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 
 	invalidSubmitMetadataError := &InvalidSubmitMetadataError{}
 
-	hasTrajectory := false
+	hasTrajectory := len(meta.TrajectoryFileNames) > 0
 	hasStructure := false
 	hasTopology := false
 
 	totalFileSize := int64(0)
 
+	allFiles := []string{}
+
+	for _, file := range meta.TrajectoryFileNames {
+		allFiles = append(allFiles, file)
+		absFilepath := filepath.Join(meta.SubmissionPath, file)
+
+		fileExist, stat := meta.hasLocalFileAndReturnStat(absFilepath)
+		if fileExist {
+			if stat != nil {
+				totalFileSize += stat.Size()
+			}
+		} else {
+			newErr := errors.Errorf("required file \"trajectory_file_names\" described in metadata %q not found", absFilepath)
+			logger.Error(newErr)
+			invalidSubmitMetadataError.Add(newErr)
+		}
+	}
+
 	var reqd_files = map[string]string{
-		"trajectory_file_name": meta.TrajectoryFileName,
-		"structure_file_name":  meta.StructureFileName,
-		"topology_file_name":   meta.TopologyFileName,
+		"structure_file_name": meta.StructureFileName,
+		"topology_file_name":  meta.TopologyFileName,
 	}
 
 	for filekey, file := range reqd_files {
@@ -137,9 +154,6 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 		if fileExist {
 			if stat != nil {
 				totalFileSize += stat.Size()
-				if filekey == "trajectory_file_name" {
-					hasTrajectory = true
-				}
 				if filekey == "structure_file_name" {
 					hasStructure = true
 				}
@@ -155,7 +169,7 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 	}
 
 	if !hasTrajectory {
-		newErr := errors.Errorf("field 'trajectory_file_name' not found")
+		newErr := errors.Errorf("field 'trajectory_file_names' not found or empty")
 		logger.Error(newErr)
 		invalidSubmitMetadataError.Add(newErr)
 	}
@@ -172,7 +186,6 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 		invalidSubmitMetadataError.Add(newErr)
 	}
 
-	allFiles := []string{}
 	for _, v := range reqd_files {
 		allFiles = append(allFiles, v)
 	}
@@ -228,7 +241,8 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 }
 
 func (meta *MDRepoSubmitMetadata) GetFiles() []string {
-	var files = []string{meta.TrajectoryFileName, meta.StructureFileName, meta.TopologyFileName}
+	files := append([]string{}, meta.TrajectoryFileNames...)
+	files = append(files, meta.StructureFileName, meta.TopologyFileName)
 
 	for _, additionalFile := range meta.AdditionalFiles {
 		for k, v := range additionalFile {

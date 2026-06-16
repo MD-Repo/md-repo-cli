@@ -1,10 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"os"
-	"runtime"
-	"fmt"
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/cmd/subcmd"
@@ -75,6 +74,31 @@ func main() {
 	subcmd.AddSubmitCommand(rootCmd)
 	subcmd.AddSubmitListCommand(rootCmd)
 	subcmd.AddUpgradeCommand(rootCmd)
+
+	// check for a new release in the background while the command runs
+	type releaseResult struct {
+		version string
+		err     error
+	}
+	releaseCh := make(chan releaseResult, 1)
+	go func() {
+		release, err := commons.CheckNewRelease()
+		if err != nil {
+			releaseCh <- releaseResult{err: err}
+			return
+		}
+		releaseCh <- releaseResult{version: release.Version()}
+	}()
+
+	notifyIfNewRelease := func() {
+		select {
+		case result := <-releaseCh:
+			if result.err == nil && commons.HasNewRelease(commons.GetClientVersion(), result.version) {
+				commons.Printf("A newer version v%s is available. Run 'mdrepo upgrade' to update.\n", result.version)
+			}
+		default:
+		}
+	}
 
 	err := Execute()
 	if err != nil {
@@ -232,14 +256,11 @@ func main() {
 			commons.PrintErrorf("Unexpected error!\nError Trace:\n  - %+v\n", err)
 		}
 
-		// check update
-		err = upgrade()
-		if err != nil {
-			logger.Errorf("Failed to check for updates: %+v", err)
-		}
-
+		notifyIfNewRelease()
 		os.Exit(1)
 	}
+
+	notifyIfNewRelease()
 }
 
 func printIRODSNetworkError() {
@@ -292,41 +313,3 @@ func printWebdavError(url string, errorCode int) {
 	}
 }
 
-func upgrade() error {
-	logger := log.WithFields(log.Fields{})
-
-	myVersion := commons.GetClientVersion()
-	logger.Debugf("Current client version installed: %s\n", myVersion)
-
-	newRelease, err := commons.CheckNewRelease()
-	if err != nil {
-		return errors.Wrapf(err, "failed to check new release")
-	}
-
-	logger.Debugf("Latest release version available for %s/%s: v%s\n", runtime.GOOS, runtime.GOARCH, newRelease.Version())
-	logger.Debugf("Latest release URL: %s\n", newRelease.URL)
-
-	if commons.HasNewRelease(myVersion, newRelease.Version()) {
-		logger.Infof("Found a new version v%s available\n", newRelease.Version())
-		commons.Printf("Found a new version v%s available\n", newRelease.Version())
-	} else {
-		logger.Debugf("Current client version installed is up-to-date [%s]\n", myVersion)
-		return nil
-	}
-
-	// ask update
-	upgrade := commons.InputYN("Do you want to upgrade to the latest version?", false)
-	if !upgrade {
-		return nil
-	}
-
-	commons.Printf("Upgrading to the latest version v%s\n", newRelease.Version())
-
-	err = commons.SelfUpgrade(newRelease)
-	if err != nil {
-		return errors.Wrapf(err, "failed to upgrade to the new release")
-	}
-
-	commons.Printf("Upgrade from %s to v%s has done successfully!\n", myVersion, newRelease.Version())
-	return nil
-}

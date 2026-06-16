@@ -421,6 +421,51 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 	// sort source paths by name to match to tickets always in the same order
 	slices.Sort(validSourcePaths)
 
+	// check files: no zero-length files and no duplicate MD5 hashes
+	hashToFiles := map[string][]string{} // md5 hex -> all file paths sharing it
+	for _, validSourcePath := range validSourcePaths {
+		entries, err := os.ReadDir(validSourcePath)
+		if err != nil {
+			return nil, nil, nil, "", errors.Wrapf(err, "Failed to read dir %q", validSourcePath)
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+
+			filePath := filepath.Join(validSourcePath, entry.Name())
+
+			info, err := entry.Info()
+			if err != nil {
+				return nil, nil, nil, "", errors.Wrapf(err, "Failed to stat %q", filePath)
+			}
+
+			if info.Size() == 0 {
+				return nil, nil, nil, "", errors.Errorf("file %q is empty", filePath)
+			}
+
+			hash, err := irodsclient_util.HashLocalFile(filePath, "md5", nil)
+			if err != nil {
+				return nil, nil, nil, "", errors.Wrapf(err, "Failed to compute MD5 for %q", filePath)
+			}
+
+			hashStr := hex.EncodeToString(hash)
+			hashToFiles[hashStr] = append(hashToFiles[hashStr], filePath)
+		}
+	}
+
+	duplicateMessages := []string{}
+	for hashStr, files := range hashToFiles {
+		if len(files) > 1 {
+			duplicateMessages = append(duplicateMessages, fmt.Sprintf("hash %s: %s", hashStr, strings.Join(files, ", ")))
+		}
+	}
+	if len(duplicateMessages) > 0 {
+		slices.Sort(duplicateMessages)
+		return nil, nil, nil, "", errors.Errorf("duplicate MD5 hashes found:\n%s", strings.Join(duplicateMessages, "\n"))
+	}
+
 	// if orcID is given, override the orcID
 	if len(orcID) > 0 {
 		return validSourcePaths, invalidSourcePaths, invalidSourcePathsErrors, orcID, nil

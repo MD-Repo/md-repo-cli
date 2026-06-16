@@ -214,9 +214,9 @@ func (submit *SubmitCommand) Process() error {
 	invalidErr := commons.VerifySubmitMetadataViaServer(validSourcePaths, submit.tokenFlagValues.ServiceURL, config.Token, submit.submissionFlagValues.NoID)
 	if invalidErr != nil {
 		return invalidErr
-	} else {
-		logger.Debugf("all submit metadata are valid")
 	}
+
+	logger.Debugf("all submit metadata are valid")
 
 	// handle retry
 	if submit.retryFlagValues.RetryNumber > 0 && !submit.retryFlagValues.RetryChild {
@@ -437,8 +437,8 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 
 		myOrcID, err := submitMetadata.GetOrcID()
 		if err != nil {
-			return nil, nil, nil, "", 
-                errors.Wrapf(err, "Failed to parse %q", validSourcePath)
+			return nil, nil, nil, "",
+				errors.Wrapf(err, "Failed to parse %q", validSourcePath)
 		}
 
 		if len(orcIDFound) == 0 {

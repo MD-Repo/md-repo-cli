@@ -76,16 +76,6 @@ func MakeTargetLocalFilePath(source string, target string, createSub bool) strin
 	return target
 }
 
-func GetFileExtension(p string) string {
-	base := GetBasename(p)
-
-	idx := strings.Index(base, ".")
-	if idx >= 0 {
-		return p[idx:]
-	}
-	return p
-}
-
 func GetIRODSPathDirname(path string) string {
 	p := strings.TrimRight(path, "/")
 	idx := strings.LastIndex(p, "/")
@@ -379,18 +369,18 @@ func ResolveSymlink(p string) (string, error) {
 
 	if st.Mode()&os.ModeSymlink == os.ModeSymlink {
 		// symlink
-		new_p, err := filepath.EvalSymlinks(p)
+		newP, err := filepath.EvalSymlinks(p)
 		if err != nil {
 			return "", errors.Wrapf(err, "failed to evaluate symlink path %q", p)
 		}
 
 		// follow recursively
-		new_pp, err := ResolveSymlink(new_p)
+		newPP, err := ResolveSymlink(newP)
 		if err != nil {
-			return "", errors.Wrapf(err, "failed to evaluate symlink path %q", new_p)
+			return "", errors.Wrapf(err, "failed to evaluate symlink path %q", newP)
 		}
 
-		return new_pp, nil
+		return newPP, nil
 	}
 	return p, nil
 }

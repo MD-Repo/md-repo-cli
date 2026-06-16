@@ -14,16 +14,16 @@ func HMACStringSHA224(secret []byte, str string) (string, error) {
 }
 
 func HMACStrings(secret []byte, strs []string, hashAlg func() hash.Hash) (string, error) {
-	hmac := hmac.New(hashAlg, secret)
+	h := hmac.New(hashAlg, secret)
 
 	for _, str := range strs {
-		_, err := hmac.Write([]byte(str))
+		_, err := h.Write([]byte(str))
 		if err != nil {
 			return "", errors.Wrapf(err, "failed to write")
 		}
 	}
 
-	sumBytes := hmac.Sum(nil)
+	sumBytes := h.Sum(nil)
 
 	// base64
 	sumString := base64.URLEncoding.EncodeToString(sumBytes)

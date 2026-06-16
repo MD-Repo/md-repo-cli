@@ -31,7 +31,7 @@ func RunWithRetry(retry int, retryInterval int) error {
 		logger.Errorf("Waiting %d seconds for next try...", retryInterval)
 		PrintErrorf("Waiting %d seconds for next try...", retryInterval)
 
-		sleepTime := time.Duration(retryInterval * int(time.Second))
+		sleepTime := time.Duration(retryInterval) * time.Second
 		time.Sleep(sleepTime)
 	}
 

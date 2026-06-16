@@ -83,10 +83,7 @@ func ParseSubmitMetadataDir(dirPath string) (*MDRepoSubmitMetadata, error) {
 }
 
 func ParseSubmitMetadataString(metadataString string) (*MDRepoSubmitMetadata, error) {
-	metadata := MDRepoSubmitMetadata{
-		MetadataFilePath: "",
-		SubmissionPath:   "",
-	}
+	metadata := MDRepoSubmitMetadata{}
 
 	_, err := toml.Decode(metadataString, &metadata)
 	if err != nil {
@@ -110,7 +107,7 @@ func (meta *MDRepoSubmitMetadata) hasLocalFileAndReturnStat(filePath string) (bo
 		return !st.IsDir(), st
 	}
 
-	return !os.IsNotExist(err), nil
+	return false, nil
 }
 
 func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
@@ -124,33 +121,46 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 
 	totalFileSize := int64(0)
 
-	var reqd_files = map[string]string{
+	var requiredFiles = map[string]string{
 		"trajectory_file_name": meta.TrajectoryFileName,
 		"structure_file_name":  meta.StructureFileName,
 		"topology_file_name":   meta.TopologyFileName,
 	}
 
-	for filekey, file := range reqd_files {
+	for filekey, file := range requiredFiles {
 		absFilepath := filepath.Join(meta.SubmissionPath, file)
 
-		fileExist, stat := meta.hasLocalFileAndReturnStat(absFilepath)
-		if fileExist {
-			if stat != nil {
-				totalFileSize += stat.Size()
-				if filekey == "trajectory_file_name" {
-					hasTrajectory = true
-				}
-				if filekey == "structure_file_name" {
-					hasStructure = true
-				}
-				if filekey == "topology_file_name" {
-					hasTopology = true
-				}
-			}
-		} else {
-			newErr := errors.Errorf("required file %q described in metadata %q not found", filekey, absFilepath)
+		st, err := os.Stat(absFilepath)
+		if err != nil {
+			newErr := errors.Wrapf(err, "cannot access required file %q described in metadata %q", absFilepath, filekey)
 			logger.Error(newErr)
 			invalidSubmitMetadataError.Add(newErr)
+			continue
+		}
+
+		if st == nil {
+			newErr := errors.Errorf("cannot stat required file %q described in metadata %q", absFilepath, filekey)
+			logger.Error(newErr)
+			invalidSubmitMetadataError.Add(newErr)
+			continue
+		}
+
+		if st.IsDir() {
+			newErr := errors.Errorf("required file %q described in metadata %q is a directory", absFilepath, filekey)
+			logger.Error(newErr)
+			invalidSubmitMetadataError.Add(newErr)
+			continue
+		}
+
+		totalFileSize += st.Size()
+		if filekey == "trajectory_file_name" {
+			hasTrajectory = true
+		}
+		if filekey == "structure_file_name" {
+			hasStructure = true
+		}
+		if filekey == "topology_file_name" {
+			hasTopology = true
 		}
 	}
 
@@ -173,7 +183,7 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 	}
 
 	allFiles := []string{}
-	for _, v := range reqd_files {
+	for _, v := range requiredFiles {
 		allFiles = append(allFiles, v)
 	}
 
@@ -182,17 +192,30 @@ func (meta *MDRepoSubmitMetadata) ValidateFiles() error {
 			if filekey == "file_name" {
 				absFilepath := filepath.Join(meta.SubmissionPath, file)
 
-				fileExist, stat := meta.hasLocalFileAndReturnStat(absFilepath)
-				if fileExist {
-					if stat != nil {
-						totalFileSize += stat.Size()
-						allFiles = append(allFiles, file)
-					}
-				} else {
-					newErr := errors.Errorf("additional file %q described in metadata %q not found", filekey, absFilepath)
+				st, err := os.Stat(absFilepath)
+				if err != nil {
+					newErr := errors.Wrapf(err, "cannot access additional file %q described in metadata %q", absFilepath, filekey)
 					logger.Error(newErr)
 					invalidSubmitMetadataError.Add(newErr)
+					continue
 				}
+
+				if st == nil {
+					newErr := errors.Errorf("cannot stat additional file %q described in metadata %q", absFilepath, filekey)
+					logger.Error(newErr)
+					invalidSubmitMetadataError.Add(newErr)
+					continue
+				}
+
+				if st.IsDir() {
+					newErr := errors.Errorf("additional file %q described in metadata %q is a directory", absFilepath, filekey)
+					logger.Error(newErr)
+					invalidSubmitMetadataError.Add(newErr)
+					continue
+				}
+
+				totalFileSize += st.Size()
+				allFiles = append(allFiles, file)
 			}
 		}
 	}

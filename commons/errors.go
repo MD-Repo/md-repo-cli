@@ -7,8 +7,8 @@ import (
 )
 
 var (
-	TokenNotProvidedError error = errors.Errorf("token not provided")
-	InvalidOrcIDError     error = errors.Errorf("invalid ORC-ID")
+	TokenNotProvidedError = errors.New("token not provided")
+	InvalidOrcIDError     = errors.New("invalid ORC-ID")
 )
 
 type MDRepoServiceError struct {

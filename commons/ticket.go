@@ -33,7 +33,7 @@ func GetMDRepoTicketString(tickets []MDRepoTicket) (string, error) {
 }
 
 func GetMDRepoTicketFromString(ticketString string) (MDRepoTicket, error) {
-	ticketParts := strings.Split(string(ticketString), ":")
+	ticketParts := strings.Split(ticketString, ":")
 	if len(ticketParts) != 2 {
 		return MDRepoTicket{}, errors.Wrapf(NewInvalidTicketError(ticketString), "failed to parse ticket parts. must have two parts")
 	}
@@ -66,7 +66,7 @@ func GetMDRepoSimulationRelPath(irodsPath string) (string, error) {
 
 func GetMDRepoTicketsFromString(ticketString string) ([]MDRepoTicket, error) {
 	tickets := strings.Split(ticketString, ";")
-	if len(tickets) < 1 {
+	if len(tickets) == 0 || len(ticketString) == 0 {
 		return nil, errors.Wrapf(NewInvalidTicketError(ticketString), "failed to parse tickets")
 	}
 

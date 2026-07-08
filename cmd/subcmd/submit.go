@@ -592,12 +592,12 @@ func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath s
 		transferMode := submit.determineTransferMode(sourceStat.Size())
 		switch transferMode {
 		case commons.TransferModeRedirect:
-			uploadResult, uploadErr = fs.UploadFileRedirectToResource(sourcePath, targetPath, "", threadsRequired, false, true, false, callbackSubmit)
+			uploadResult, uploadErr = fs.UploadFileRedirectToResource(sourcePath, targetPath, "", threadsRequired, false, true, callbackSubmit)
 			notes = append(notes, "redirect-to-resource", fmt.Sprintf("%d threads", threadsRequired))
 		case commons.TransferModeICAT:
 			fallthrough
 		default:
-			uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", threadsRequired, false, true, false, callbackSubmit)
+			uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", threadsRequired, false, true, callbackSubmit)
 			notes = append(notes, "icat", fmt.Sprintf("%d threads", threadsRequired))
 		}
 

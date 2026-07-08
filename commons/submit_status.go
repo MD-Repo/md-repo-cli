@@ -142,7 +142,7 @@ func (s *SubmitStatusFile) CreateStatusFile(filesystem *fs.FileSystem, dataRootP
 	}
 
 	// we do not truncate status file as it should be empty
-	_, err = filesystem.UploadFileFromBuffer(&jsonBytesBuffer, statusFilePath, "", false, true, true, nil)
+	_, err = filesystem.UploadFileFromBuffer(&jsonBytesBuffer, statusFilePath, "", false, true, nil)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create submit status file %q", statusFilePath)
 	}

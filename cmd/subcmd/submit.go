@@ -12,7 +12,17 @@ import (
 	"time"
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
-	"github.com/MD-Repo/md-repo-cli/commons"
+	"github.com/MD-Repo/md-repo-cli/commons/checksum"
+	"github.com/MD-Repo/md-repo-cli/commons/config"
+	"github.com/MD-Repo/md-repo-cli/commons/irods"
+	"github.com/MD-Repo/md-repo-cli/commons/mdrepo"
+	"github.com/MD-Repo/md-repo-cli/commons/parallel"
+	commons_path "github.com/MD-Repo/md-repo-cli/commons/path"
+	"github.com/MD-Repo/md-repo-cli/commons/terminal"
+	"github.com/MD-Repo/md-repo-cli/commons/transfer"
+	"github.com/MD-Repo/md-repo-cli/commons/types"
+	"github.com/MD-Repo/md-repo-cli/commons/webdav"
+	"github.com/avast/retry-go"
 	"github.com/cockroachdb/errors"
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
@@ -24,9 +34,9 @@ import (
 )
 
 var submitCmd = &cobra.Command{
-	Use:     "submit [data dirs] ...",
+	Use:     "submit <data dirs> ...",
 	Short:   "Submit local data to MD-Repo",
-	Long:    fmt.Sprintf("Submit local data to MD-Repo (%s)", commons.GetClientVersion()),
+	Long:    "This command submits local data to MD-Repo",
 	Aliases: []string{"upload", "up", "put", "contribute"},
 	RunE:    processSubmitCommand,
 	Args:    cobra.MinimumNArgs(1),
@@ -38,8 +48,8 @@ func AddSubmitCommand(rootCmd *cobra.Command) {
 
 	flag.SetSubmissionFlags(submitCmd)
 	flag.SetTokenFlags(submitCmd)
+	flag.SetParallelTransferFlags(submitCmd, false, false)
 	flag.SetForceFlags(submitCmd, true)
-	flag.SetParallelTransferFlags(submitCmd, false, false, true)
 	flag.SetProgressFlags(submitCmd)
 	flag.SetRetryFlags(submitCmd)
 	flag.SetTransferReportFlags(submitCmd)
@@ -62,23 +72,28 @@ type SubmitCommand struct {
 	commonFlagValues           *flag.CommonFlagValues
 	submissionFlagValues       *flag.SubmissionFlagValues
 	tokenFlagValues            *flag.TokenFlagValues
-	forceFlagValues            *flag.ForceFlagValues
 	parallelTransferFlagValues *flag.ParallelTransferFlagValues
+	forceFlagValues            *flag.ForceFlagValues
 	progressFlagValues         *flag.ProgressFlagValues
 	retryFlagValues            *flag.RetryFlagValues
 	transferReportFlagValues   *flag.TransferReportFlagValues
 
 	maxConnectionNum int
 
-	account    *irodsclient_types.IRODSAccount
-	filesystem *irodsclient_fs.FileSystem
+	account      *irodsclient_types.IRODSAccount
+	filesystem   *irodsclient_fs.FileSystem
+	webdavClient *webdav.WebDAVClient
 
 	sourcePaths []string
 
-	parallelJobManager    *commons.ParallelJobManager
-	transferReportManager *commons.TransferReportManager
-	submitStatusFile      *commons.SubmitStatusFile
-	updatedPathMap        map[string]bool
+	parallelTransferJobManager *parallel.ParallelJobManager
+	transferReportManager      *transfer.TransferReportManager
+	config                     *config.Config
+	submitStatusFileWriter     *mdrepo.SubmitStatusFileWriter
+
+	totalUploadedFiles int
+	totalUploadedBytes int64
+	startTime          time.Time
 }
 
 func NewSubmitCommand(command *cobra.Command, args []string) (*SubmitCommand, error) {
@@ -88,13 +103,16 @@ func NewSubmitCommand(command *cobra.Command, args []string) (*SubmitCommand, er
 		commonFlagValues:           flag.GetCommonFlagValues(command),
 		submissionFlagValues:       flag.GetSubmissionFlagValues(),
 		tokenFlagValues:            flag.GetTokenFlagValues(),
-		forceFlagValues:            flag.GetForceFlagValues(),
 		parallelTransferFlagValues: flag.GetParallelTransferFlagValues(),
+		forceFlagValues:            flag.GetForceFlagValues(),
 		progressFlagValues:         flag.GetProgressFlagValues(),
 		retryFlagValues:            flag.GetRetryFlagValues(),
 		transferReportFlagValues:   flag.GetTransferReportFlagValues(command),
 
-		updatedPathMap: map[string]bool{},
+		config:             config.GetConfig(),
+		totalUploadedFiles: 0,
+		totalUploadedBytes: 0,
+		startTime:          time.Now(),
 	}
 
 	submit.maxConnectionNum = submit.parallelTransferFlagValues.ThreadNumber
@@ -106,8 +124,8 @@ func NewSubmitCommand(command *cobra.Command, args []string) (*SubmitCommand, er
 }
 
 func (submit *SubmitCommand) Process() error {
-	fmt.Printf("submit %s\n", commons.GetClientVersion())
 	logger := log.WithFields(log.Fields{})
+	terminal.Printf("submitting data to MD-Repo\n")
 
 	cont, err := flag.ProcessCommonFlags(submit.command)
 	if err != nil {
@@ -117,89 +135,87 @@ func (submit *SubmitCommand) Process() error {
 		return nil
 	}
 
-	config := commons.GetConfig()
-
 	// handle token
 	if len(submit.tokenFlagValues.TicketString) > 0 {
-		config.TicketString = submit.tokenFlagValues.TicketString
+		submit.config.TicketString = submit.tokenFlagValues.TicketString
 	}
 
 	if len(submit.tokenFlagValues.Token) > 0 {
-		config.Token = submit.tokenFlagValues.Token
+		submit.config.Token = submit.tokenFlagValues.Token
 	}
 
 	// handle local flags
-	_, err = commons.InputMissingFields()
+	_, err = config.InputMissingFields()
 	if err != nil {
-		return errors.Wrapf(err, "Failed to input missing fields")
+		return errors.Wrapf(err, "failed to input missing fields")
 	}
 
+	// validate source paths
+	terminal.Printf("validating metadata files...\n")
 	validSourcePaths, invalidSourcePaths, invalidSourcePathsErrors, orcID, err := submit.scanSourcePaths(submit.submissionFlagValues.OrcID)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to scan source paths")
 	}
 
-	if !submit.retryFlagValues.RetryChild {
-		// only parent has input
-		expectedSimulationNo := 0
-		if submit.submissionFlagValues.ExpectedSimulations > 0 {
-			expectedSimulationNo = submit.submissionFlagValues.ExpectedSimulations
-		} else {
-			expectedSimulationNo = commons.InputSimulationNo()
-		}
-
-		if expectedSimulationNo != len(validSourcePaths) {
-			logger.Debugf("we found %d simulations, but expected %d simulations", len(validSourcePaths), expectedSimulationNo)
-
-			logger.Debugf("the simulations found:")
-			for sourceIdx, sourcePath := range validSourcePaths {
-				logger.Debugf("[%d] %s", sourceIdx+1, sourcePath)
-			}
-
-			logger.Debugf("the directories ignored due to lack of metadata file:")
-			for sourceIdx, sourcePath := range invalidSourcePaths {
-				if len(invalidSourcePathsErrors) > sourceIdx {
-					logger.Debugf("[%d] %s: %s", sourceIdx+1, sourcePath, invalidSourcePathsErrors[sourceIdx])
-				} else {
-					logger.Debugf("[%d] %s", sourceIdx+1, sourcePath)
-				}
-			}
-
-			return commons.NewSimulationNoNotMatchingError(validSourcePaths, invalidSourcePaths, invalidSourcePathsErrors, expectedSimulationNo)
-		}
-
-		if len(orcID) == 0 {
-			orcID = commons.InputOrcID()
-		}
+	// check if the number of simulations matches the expected number
+	expectedSimulationNo := 0
+	if submit.submissionFlagValues.ExpectedSimulations > 0 {
+		expectedSimulationNo = submit.submissionFlagValues.ExpectedSimulations
+	} else {
+		expectedSimulationNo = terminal.InputInt("Number of simulations expected")
 	}
 
-	if len(config.Token) > 0 && len(config.TicketString) == 0 {
+	if expectedSimulationNo != len(validSourcePaths) {
+		logger.Debugf("we found %d simulations, but expected %d simulations", len(validSourcePaths), expectedSimulationNo)
+
+		logger.Debugf("the simulations found:")
+		for sourceIdx, sourcePath := range validSourcePaths {
+			logger.Debugf("[%d] %s", sourceIdx+1, sourcePath)
+		}
+
+		logger.Debugf("the directories ignored due to lack of metadata file:")
+		for sourceIdx, sourcePath := range invalidSourcePaths {
+			if len(invalidSourcePathsErrors) > sourceIdx {
+				logger.Debugf("[%d] %s: %s", sourceIdx+1, sourcePath, invalidSourcePathsErrors[sourceIdx])
+			} else {
+				logger.Debugf("[%d] %s", sourceIdx+1, sourcePath)
+			}
+		}
+
+		return types.NewSimulationNoNotMatchingError(validSourcePaths, invalidSourcePaths, invalidSourcePathsErrors, expectedSimulationNo)
+	}
+
+	if len(orcID) == 0 {
+		orcID = terminal.Input("Input ORCID")
+	}
+
+	if len(submit.config.Token) > 0 && len(submit.config.TicketString) == 0 {
 		// encrypt
-		tokenBytes, err := commons.Base64Decode(config.Token)
+		tokenBytes, err := checksum.Base64Decode(submit.config.Token)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to decode token using BASE64")
 		}
 
-		newToken, err := commons.HMACStringSHA224(tokenBytes, orcID)
+		newToken, err := checksum.HMACStringSHA224(tokenBytes, orcID)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to encrypt token using SHA3-224 HMAC")
 		}
 
 		logger.Debugf("encrypted token: %s", newToken)
 
-		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(submit.tokenFlagValues.ServiceURL, newToken)
+		submit.config.TicketString, err = mdrepo.GetMDRepoTicketStringFromToken(submit.tokenFlagValues.ServiceURL, newToken)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to read ticket from token")
 		}
 	}
 
-	if len(config.TicketString) == 0 {
-		return commons.TokenNotProvidedError
+	if len(submit.config.TicketString) == 0 {
+		return types.NewTokenNotProvidedError()
 	}
 
 	// verify metadata first
 	for _, sourcePath := range validSourcePaths {
-		metadata, err := commons.ParseSubmitMetadataDir(sourcePath)
+		metadata, err := mdrepo.ParseSubmitMetadataDir(sourcePath)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to parse submit metadata in dir %q", sourcePath)
 		}
@@ -211,31 +227,16 @@ func (submit *SubmitCommand) Process() error {
 	}
 
 	// verify metadata via server
-	invalidErr := commons.VerifySubmitMetadataViaServer(validSourcePaths, submit.tokenFlagValues.ServiceURL, config.Token, submit.submissionFlagValues.NoID)
+	invalidErr := mdrepo.VerifySubmitMetadataViaServer(validSourcePaths, submit.tokenFlagValues.ServiceURL, submit.config.Token, submit.submissionFlagValues.NoID)
 	if invalidErr != nil {
 		return invalidErr
 	}
 
+	terminal.Printf("all metadata files are valid\n")
 	logger.Debugf("all submit metadata are valid")
 
-	// handle retry
-	if submit.retryFlagValues.RetryNumber > 0 && !submit.retryFlagValues.RetryChild {
-		err = commons.RunWithRetry(submit.retryFlagValues.RetryNumber, submit.retryFlagValues.RetryIntervalSeconds)
-		if err != nil {
-			return errors.Wrapf(err, "Failed to run with retry %d", submit.retryFlagValues.RetryNumber)
-		}
-		return nil
-	}
-
-	// transfer report
-	submit.transferReportManager, err = commons.NewTransferReportManager(submit.transferReportFlagValues.Report, submit.transferReportFlagValues.ReportPath, submit.transferReportFlagValues.ReportToStdout)
-	if err != nil {
-		return errors.Wrapf(err, "Failed to create transfer report manager")
-	}
-	defer submit.transferReportManager.Release()
-
 	// get ticket
-	mdRepoTickets, err := commons.GetMDRepoTicketsFromString(config.TicketString)
+	mdRepoTickets, err := mdrepo.GetMDRepoTicketsFromString(submit.config.TicketString)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to retrieve tickets")
 	}
@@ -244,117 +245,100 @@ func (submit *SubmitCommand) Process() error {
 		logger.Debugf("we found %d simulations, but we got %d tokens", len(mdRepoTickets), len(validSourcePaths))
 	}
 
+	// transfer report
+	submit.transferReportManager, err = transfer.NewTransferReportManager(submit.transferReportFlagValues.Report, submit.transferReportFlagValues.ReportPath, submit.transferReportFlagValues.ReportToStdout)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to create transfer report manager")
+	}
+	defer submit.transferReportManager.Release()
+
+	// run
 	for ticketIdx, mdRepoTicket := range mdRepoTickets {
-		// process each ticket
 		sourcePath := validSourcePaths[ticketIdx]
-		targetPath := commons.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
-
-		logger.Debugf("submitting %q to %q", sourcePath, targetPath)
-
-		// we create filesystem, job manager for every ticket as they require separate auth
-		// Create a file system
-		submit.account, err = commons.GetAccount(&mdRepoTicket)
+		err = submit.processTicket(sourcePath, &mdRepoTicket)
 		if err != nil {
-			return errors.Wrapf(err, "Failed to get iRODS Account")
+			return err
 		}
+	}
 
-		submit.filesystem, err = commons.GetIRODSFSClientForLargeFileIO(submit.account, submit.maxConnectionNum, submit.parallelTransferFlagValues.TCPBufferSize)
-		if err != nil {
-			return errors.Wrapf(err, "Failed to get iRODS FS Client")
-		}
-
-		// parallel job manager
-		submit.parallelJobManager = commons.NewParallelJobManager(submit.filesystem, submit.parallelTransferFlagValues.ThreadNumber, !submit.progressFlagValues.NoProgress, submit.progressFlagValues.ShowFullPath)
-		submit.parallelJobManager.Start()
-
-		// submit status file
-		submit.submitStatusFile = commons.NewSubmitStatusFile()
-		submit.submitStatusFile.Token = config.Token
-
-		// run
-		err = submit.submitOne(mdRepoTicket, sourcePath, targetPath)
-		if err != nil {
-			submit.submitStatusFile.SetErrored()
-			submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
-			submit.filesystem.Release()
-			submit.filesystem = nil
-			return errors.Wrapf(err, "Failed to submit %q to %q", sourcePath, targetPath)
-		}
-
-		// create a status file
-		submit.submitStatusFile.SetInProgress()
-		err = submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
-		if err != nil {
-			submit.filesystem.Release()
-			submit.filesystem = nil
-			return errors.Wrapf(err, "Failed to create status file on %q", targetPath)
-		}
-
-		// release parallel job manager
-		submit.parallelJobManager.DoneScheduling()
-
-		err = submit.parallelJobManager.Wait()
-		if err != nil {
-			submit.submitStatusFile.SetErrored()
-			submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
-			submit.filesystem.Release()
-			submit.filesystem = nil
-			return errors.Wrapf(err, "Failed to perform parallel jobs")
-		}
-
-		// status file
-		submit.submitStatusFile.SetCompleted()
-		err = submit.submitStatusFile.CreateStatusFile(submit.filesystem, targetPath)
-		if err != nil {
-			submit.filesystem.Release()
-			submit.filesystem = nil
-			return errors.Wrapf(err, "Failed to create status file on %q", targetPath)
-		}
-
-		// done
-		logger.Debugf("submitted %q to %q", sourcePath, targetPath)
-
-		submit.parallelJobManager = nil
-
-		submit.filesystem.Release()
-		submit.filesystem = nil
+	// print final summary
+	if !submit.progressFlagValues.NoProgress {
+		timeTaken := time.Since(submit.startTime).Seconds()
+		totalUploadedSize := types.SizeString(submit.totalUploadedBytes)
+		bps := float64(submit.totalUploadedBytes) / timeTaken
+		bpsString := fmt.Sprintf("%s/s", types.SizeString(int64(bps)))
+		terminal.Printf("Uploaded %d files, %s in total, time taken: %.2f seconds, average speed: %s\n", submit.totalUploadedFiles, totalUploadedSize, timeTaken, bpsString)
 	}
 
 	return nil
 }
 
-func (submit *SubmitCommand) checkValidSourcePath(sourcePath string) error {
-	st, err := os.Stat(sourcePath)
+func (submit *SubmitCommand) processTicket(sourcePath string, mdRepoTicket *mdrepo.MDRepoTicket) error {
+	// we create filesystem, job manager for every ticket as they require separate auth
+	// Create a file system
+	account, err := mdRepoTicket.GetAccount()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return errors.Join(err, irodsclient_types.NewFileNotFoundError(sourcePath))
+		return errors.Wrapf(err, "Failed to get iRODS Account")
+	}
+
+	submit.account = account
+
+	submit.filesystem, err = irods.GetIRODSFSClientForLargeFileIO(submit.account, submit.maxConnectionNum, submit.parallelTransferFlagValues.TCPBufferSize, true, submit.commonFlagValues.Timeout)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to get iRODS FS Client")
+	}
+	defer func() {
+		submit.filesystem.Release()
+		submit.filesystem = nil
+	}()
+
+	if submit.parallelTransferFlagValues.WebDAV {
+		webdavClient, err := webdav.NewWebDAVClient(submit.filesystem, config.MDRepoWebDAVServerURL+config.MDRepoWebDAVPrefix, submit.account.ProxyUser, submit.account.Password)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to create WebDAV client")
 		}
 
-		return errors.Wrapf(err, "Failed to stat source %q", sourcePath)
+		submit.webdavClient = webdavClient
 	}
 
-	if !st.IsDir() {
-		return commons.NewNotDirError(sourcePath)
-	}
+	// parallel job manager
+	ioSession := submit.filesystem.GetIOSession()
+	submit.parallelTransferJobManager = parallel.NewParallelJobManager(ioSession.GetMaxConnections(), !submit.progressFlagValues.NoProgress, submit.progressFlagValues.ShowFullPath, submit.parallelTransferFlagValues.StopOnError)
 
-	// check if source path has metadata in it
-	if !commons.HasSubmitMetadataInDir(sourcePath) {
-		// metadata path not exist?
-		return errors.Errorf("source %q must have submit metadata", sourcePath)
-	}
+	// run
+	targetPath := commons_path.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
 
-	entries, err := os.ReadDir(sourcePath)
+	// setup submit status file writer
+	submit.submitStatusFileWriter = mdrepo.NewSubmitStatusFileWriter(submit.filesystem, submit.config.Token, targetPath)
+
+	// run
+	err = submit.submitOne(mdRepoTicket, sourcePath)
 	if err != nil {
-		return errors.Wrapf(err, "Failed to readdir source %q", sourcePath)
+		submit.submitStatusFileWriter.SetErrored()
+		submit.submitStatusFileWriter.CreateStatusFile()
+		return errors.Wrapf(err, "Failed to submit %q to %q", sourcePath, targetPath)
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			// found dir
-			return commons.NewNotFileError(filepath.Join(sourcePath, entry.Name()))
-		}
+	// create a in-progress status file
+	submit.submitStatusFileWriter.SetInProgress()
+	err = submit.submitStatusFileWriter.CreateStatusFile()
+	if err != nil {
+		return errors.Wrapf(err, "Failed to create status file on %q", targetPath)
 	}
 
+	defer func() {
+		submit.submitStatusFileWriter.CreateStatusFile()
+		submit.submitStatusFileWriter = nil
+	}()
+
+	transferErr := submit.parallelTransferJobManager.Start()
+	if transferErr != nil {
+		submit.submitStatusFileWriter.SetErrored()
+		return errors.Wrap(transferErr, "failed to perform transfer jobs")
+	}
+
+	// set completed
+	submit.submitStatusFileWriter.SetCompleted()
 	return nil
 }
 
@@ -365,7 +349,7 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 	invalidSourcePathsErrors := []error{}
 
 	for _, sourcePath := range submit.sourcePaths {
-		sourcePath = commons.MakeLocalPath(sourcePath)
+		sourcePath = commons_path.MakeLocalPath(sourcePath)
 
 		st, stErr := os.Stat(sourcePath)
 		if stErr != nil {
@@ -377,10 +361,10 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 		}
 
 		if !st.IsDir() {
-			return nil, nil, nil, "", commons.NewNotDirError(sourcePath)
+			return nil, nil, nil, "", types.NewNotDirError(sourcePath)
 		}
 
-		err := submit.checkValidSourcePath(sourcePath)
+		err := mdrepo.ValidateSubmissionSourcePath(sourcePath)
 		if err == nil {
 			// valid
 			validSourcePaths = append(validSourcePaths, sourcePath)
@@ -399,7 +383,7 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 				hasSubDirs = true
 
 				entryPath := filepath.Join(sourcePath, dirEntry.Name())
-				chkErr := submit.checkValidSourcePath(entryPath)
+				chkErr := mdrepo.ValidateSubmissionSourcePath(entryPath)
 				if chkErr == nil {
 					// valid
 					validSourcePaths = append(validSourcePaths, entryPath)
@@ -473,8 +457,8 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 
 	orcIDFound := ""
 	for _, validSourcePath := range validSourcePaths {
-		metadataPath := commons.GetSubmitMetadataPath(validSourcePath)
-		submitMetadata, err := commons.ParseSubmitMetadataFile(metadataPath)
+		metadataPath := mdrepo.GetSubmitMetadataPath(validSourcePath)
+		submitMetadata, err := mdrepo.ParseSubmitMetadataFile(metadataPath)
 
 		if err != nil {
 			return nil, nil, nil, "", errors.Wrapf(err, "Failed to parse metadata for %q", validSourcePath)
@@ -491,22 +475,23 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 		}
 
 		if orcIDFound != myOrcID {
-			return nil, nil, nil, "", errors.Errorf("Lead Contributor's ORCID mismatch for %q, expected %s, but got %s: %w", validSourcePath, orcIDFound, myOrcID, commons.InvalidOrcIDError)
+			return nil, nil, nil, "", errors.Errorf("Lead Contributor's ORCID mismatch for %q, expected %s, but got %s: %w", validSourcePath, orcIDFound, myOrcID, types.NewInvalidOrcIDError(myOrcID, orcIDFound))
 		}
 	}
 
 	return validSourcePaths, invalidSourcePaths, invalidSourcePathsErrors, orcIDFound, nil
 }
 
-func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, sourcePath string, targetPath string) error {
+func (submit *SubmitCommand) submitOne(mdRepoTicket *mdrepo.MDRepoTicket, sourcePath string) error {
 	logger := log.WithFields(log.Fields{
 		"irods_data_path": mdRepoTicket.IRODSDataPath,
 		"irods_ticket":    mdRepoTicket.IRODSTicket,
 		"source_path":     sourcePath,
-		"target_path":     targetPath,
 	})
 
-	logger.Debugf("submit %q to %q (ticket: %q)", sourcePath, targetPath, mdRepoTicket.IRODSTicket)
+	targetPath := commons_path.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
+
+	logger.Debugf("upload %q to %q (ticket: %q)", sourcePath, targetPath, mdRepoTicket.IRODSTicket)
 
 	sourceStat, err := os.Stat(sourcePath)
 	if err != nil {
@@ -517,15 +502,12 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 		return errors.Wrapf(err, "Failed to stat %q", sourcePath)
 	}
 
-	targetRootPath := targetPath
-
 	if !sourceStat.IsDir() {
 		// file is provided
 		return errors.Errorf("source path must be a directory")
 	}
 
-	// dir
-	metadata, err := commons.ParseSubmitMetadataDir(sourcePath)
+	metadata, err := mdrepo.ParseSubmitMetadataDir(sourcePath)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to parse submit metadata in dir %q", sourcePath)
 	}
@@ -534,14 +516,14 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 
 	hasMetadata := false
 	for _, sourceFile := range sourceFiles {
-		if filepath.Base(sourceFile) == commons.SubmissionMetadataFilename {
+		if filepath.Base(sourceFile) == mdrepo.SubmissionMetadataFilename {
 			hasMetadata = true
 		}
 	}
 
 	if !hasMetadata {
 		// include submission metadata file itself
-		sourceFiles = append(sourceFiles, commons.SubmissionMetadataFilename)
+		sourceFiles = append(sourceFiles, mdrepo.SubmissionMetadataFilename)
 	}
 
 	for _, sourceFile := range sourceFiles {
@@ -551,125 +533,96 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket commons.MDRepoTicket, source
 			return errors.Wrapf(err, "Failed to stat source file %q", sourceFileAbsPath)
 		}
 
-		targetFilePath := path.Join(targetRootPath, sourceFile)
+		targetFilePath := path.Join(targetPath, sourceFile)
 
-		submitErr := submit.submitFile(sourceFileStat, sourceFileAbsPath, targetRootPath, targetFilePath)
+		submitErr := submit.submitFile(mdRepoTicket, sourceFileStat, sourceFileAbsPath, targetPath, targetFilePath)
 		if submitErr != nil {
 			return submitErr
 		}
-	}
 
-	return nil
-}
-
-func (submit *SubmitCommand) scheduleSubmit(sourceStat fs.FileInfo, sourcePath string, targetRootPath string, targetPath string) error {
-	logger := log.WithFields(log.Fields{
-		"source_path":      sourcePath,
-		"target_root_path": targetRootPath,
-		"target_path":      targetPath,
-	})
-
-	threadsRequired := submit.calculateThreadForTransferJob(sourceStat.Size())
-
-	submitTask := func(job *commons.ParallelJob) error {
-		manager := job.GetManager()
-		fs := manager.GetFilesystem()
-
-		lastTaskType := "" // checksum then upload
-
-		callbackSubmit := func(taskType string, processed int64, total int64) {
-			lastTaskType = taskType
-			job.Progress(taskType, processed, total, false)
-		}
-
-		logger.Debugf("uploading a file %q to %q", sourcePath, targetPath)
-
-		var uploadErr error
-		var uploadResult *irodsclient_fs.FileTransferResult
-		notes := []string{}
-
-		// determine how to upload
-		transferMode := submit.determineTransferMode(sourceStat.Size())
-		switch transferMode {
-		case commons.TransferModeRedirect:
-			uploadResult, uploadErr = fs.UploadFileRedirectToResource(sourcePath, targetPath, "", threadsRequired, false, true, callbackSubmit)
-			notes = append(notes, "redirect-to-resource", fmt.Sprintf("%d threads", threadsRequired))
-		case commons.TransferModeICAT:
-			fallthrough
-		default:
-			uploadResult, uploadErr = fs.UploadFileParallel(sourcePath, targetPath, "", threadsRequired, false, true, callbackSubmit)
-			notes = append(notes, "icat", fmt.Sprintf("%d threads", threadsRequired))
-		}
-
-		if uploadErr != nil {
-			job.Progress(lastTaskType, -1, sourceStat.Size(), true)
-			return errors.Wrapf(uploadErr, "Failed to upload %q to %q", sourcePath, targetPath)
-		}
-
-		err := submit.transferReportManager.AddTransfer(uploadResult, commons.TransferMethodPut, uploadErr, notes)
+		// add status entry
+		hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5", nil)
 		if err != nil {
-			return errors.Wrapf(err, "Failed to add transfer report")
+			return errors.Wrapf(err, "Failed to get hash for %q", sourcePath)
 		}
 
-		logger.Debugf("Uploaded a file %q to %q", sourcePath, targetPath)
-
-		job.Done()
-		return nil
+		submitStatusEntry := mdrepo.SubmitStatusEntry{
+			IRODSPath: commons_path.GetIRODSRelativePath(targetPath, targetFilePath),
+			Size:      sourceStat.Size(),
+			MD5Hash:   hex.EncodeToString(hash),
+		}
+		submit.submitStatusFileWriter.AddFile(submitStatusEntry)
 	}
-
-	// submit status file
-	hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5", nil)
-	if err != nil {
-		return errors.Wrapf(err, "Failed to get hash for %q", sourcePath)
-	}
-
-	targetRelPath := targetPath
-	if strings.HasPrefix(targetPath, fmt.Sprintf("%s/", targetRootPath)) {
-		targetRelPath = targetPath[len(targetRootPath)+1:]
-	}
-
-	submitStatusEntry := commons.SubmitStatusEntry{
-		IRODSPath: targetRelPath,
-		Size:      sourceStat.Size(),
-		MD5Hash:   hex.EncodeToString(hash),
-	}
-	submit.submitStatusFile.AddFile(submitStatusEntry)
-
-	// schedule
-	err = submit.parallelJobManager.Schedule(sourcePath, submitTask, threadsRequired, progress.UnitsBytes)
-	if err != nil {
-		return errors.Wrapf(err, "Failed to schedule upload %q to %q", sourcePath, targetPath)
-	}
-
-	logger.Debugf("scheduled a file upload %q to %q", sourcePath, targetPath)
 
 	return nil
 }
 
-func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath string, targetRootPath string, targetPath string) error {
+func (submit *SubmitCommand) submitFile(mdRepoTicket *mdrepo.MDRepoTicket, sourceStat fs.FileInfo, sourcePath string, targetRootPath string, targetPath string) error {
 	logger := log.WithFields(log.Fields{
+		"irods_data_path":  mdRepoTicket.IRODSDataPath,
+		"irods_ticket":     mdRepoTicket.IRODSTicket,
 		"source_path":      sourcePath,
 		"target_root_path": targetRootPath,
 		"target_path":      targetPath,
 	})
 
-	commons.MarkIRODSPathMap(submit.updatedPathMap, targetPath)
+	defaultNotes := []string{"put"}
+
+	reportSimple := func(err error, additionalNotes ...string) {
+		now := time.Now()
+		newNotes := append(defaultNotes, additionalNotes...)
+		newNotes = append(newNotes, "file")
+
+		reportFile := &transfer.TransferReportFile{
+			Method:     transfer.TransferMethodPut,
+			StartAt:    now,
+			EndAt:      now,
+			SourcePath: sourcePath,
+			SourceSize: sourceStat.Size(),
+			DestPath:   targetPath,
+			Error:      err,
+			Notes:      newNotes,
+		}
+
+		submit.transferReportManager.AddFile(reportFile)
+	}
+
+	reportOverwrite := func(startTime time.Time, endTime time.Time, err error, additionalNotes ...string) {
+		newNotes := append(defaultNotes, additionalNotes...)
+		newNotes = append(newNotes, "overwrite")
+
+		reportFile := &transfer.TransferReportFile{
+			Method:   transfer.TransferMethodDelete,
+			StartAt:  startTime,
+			EndAt:    endTime,
+			DestPath: targetPath,
+			Error:    err,
+			Notes:    newNotes,
+		}
+
+		submit.transferReportManager.AddFile(reportFile)
+	}
 
 	targetEntry, err := submit.filesystem.Stat(targetPath)
 	if err != nil {
 		if irodsclient_types.IsFileNotFoundError(err) {
 			// target does not exist
 			// target must be a file with new name
-			return submit.scheduleSubmit(sourceStat, sourcePath, targetRootPath, targetPath)
+			submit.scheduleSubmit(mdRepoTicket, sourceStat, sourcePath, targetRootPath, targetPath)
+			return nil
 		}
 
-		return errors.Wrapf(err, "Failed to stat %q", targetPath)
+		reportSimple(err)
+		return errors.Wrapf(err, "failed to stat %q", targetPath)
 	}
 
 	// target exists
 	// target must be a file
 	if targetEntry.IsDir() {
-		return commons.NewNotFileError(targetPath)
+		notFileErr := types.NewNotFileError(targetPath)
+		now := time.Now()
+		reportOverwrite(now, now, notFileErr, "directory")
+		return notFileErr
 	}
 
 	if !submit.forceFlagValues.Force {
@@ -684,8 +637,8 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 				if bytes.Equal(localChecksum, targetEntry.CheckSum) {
 					// skip
 					now := time.Now()
-					reportFile := &commons.TransferReportFile{
-						Method:                  commons.TransferMethodPut,
+					reportFile := &transfer.TransferReportFile{
+						Method:                  transfer.TransferMethodPut,
 						StartAt:                 now,
 						EndAt:                   now,
 						SourcePath:              sourcePath,
@@ -696,31 +649,14 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 						DestSize:                targetEntry.Size,
 						DestChecksum:            hex.EncodeToString(targetEntry.CheckSum),
 						DestChecksumAlgorithm:   string(targetEntry.CheckSumAlgorithm),
-						Notes:                   []string{"differential", "same checksum", "skip"},
+
+						Notes: []string{"put", "file", "differential", "same checksum", "skipped"},
 					}
 
 					submit.transferReportManager.AddFile(reportFile)
 
-					commons.Printf("skip uploading a file %q to %q. The file with the same hash already exists!\n", sourcePath, targetPath)
-					logger.Debugf("skip uploading a file %q to %q. The file with the same hash already exists!", sourcePath, targetPath)
-
-					// add skipped status entry
-					hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5", nil)
-					if err != nil {
-						return errors.Wrapf(err, "Failed to get hash for %q", sourcePath)
-					}
-
-					targetRelPath := targetPath
-					if strings.HasPrefix(targetPath, fmt.Sprintf("%s/", targetRootPath)) {
-						targetRelPath = targetPath[len(targetRootPath)+1:]
-					}
-
-					submitStatusEntry := commons.SubmitStatusEntry{
-						IRODSPath: targetRelPath,
-						Size:      targetEntry.Size,
-						MD5Hash:   hex.EncodeToString(hash),
-					}
-					submit.submitStatusFile.AddFile(submitStatusEntry)
+					terminal.Printf("skip uploading a file %q to %q. The data object with the same hash already exists!\n", sourcePath, targetPath)
+					logger.Debug("skip uploading a file. The data object with the same hash already exists!")
 					return nil
 				}
 			}
@@ -728,44 +664,141 @@ func (submit *SubmitCommand) submitFile(sourceStat fs.FileInfo, sourcePath strin
 	}
 
 	// schedule
-	return submit.scheduleSubmit(sourceStat, sourcePath, targetRootPath, targetPath)
+	return submit.scheduleSubmit(mdRepoTicket, sourceStat, sourcePath, targetRootPath, targetPath)
 }
 
-func (submit *SubmitCommand) calculateThreadForTransferJob(size int64) int {
-	threads := commons.CalculateThreadForTransferJob(size, submit.parallelTransferFlagValues.ThreadNumberPerFile)
+func (submit *SubmitCommand) scheduleSubmit(mdRepoTicket *mdrepo.MDRepoTicket, sourceStat fs.FileInfo, sourcePath string, targetRootPath string, targetPath string) error {
+	logger := log.WithFields(log.Fields{
+		"irods_data_path":  mdRepoTicket.IRODSDataPath,
+		"irods_ticket":     mdRepoTicket.IRODSTicket,
+		"source_path":      sourcePath,
+		"target_root_path": targetRootPath,
+		"target_path":      targetPath,
+	})
+
+	defaultNotes := []string{"put"}
+
+	reportSimple := func(err error, additionalNotes ...string) {
+		now := time.Now()
+		newNotes := append(defaultNotes, additionalNotes...)
+		newNotes = append(newNotes, "file")
+
+		reportFile := &transfer.TransferReportFile{
+			Method:     transfer.TransferMethodPut,
+			StartAt:    now,
+			EndAt:      now,
+			SourcePath: sourcePath,
+			SourceSize: sourceStat.Size(),
+			DestPath:   targetPath,
+			Error:      err,
+			Notes:      newNotes,
+		}
+
+		submit.transferReportManager.AddFile(reportFile)
+	}
+
+	reportTransfer := func(result *irodsclient_fs.FileTransferResult, err error, additionalNotes ...string) {
+		newNotes := append(defaultNotes, additionalNotes...)
+
+		submit.transferReportManager.AddTransfer(result, transfer.TransferMethodPut, err, newNotes)
+	}
+
+	transferMode, threadsRequired := submit.determineTransferMethod(sourceStat.Size())
+
+	submitTask := func(job *parallel.ParallelJob) error {
+		if job.IsCanceled() {
+			// job is canceled, do not run
+			job.Progress("upload", -1, sourceStat.Size(), true)
+
+			reportSimple(nil, "canceled")
+			logger.Debug("canceled a task for uploading a file")
+			return nil
+		}
+
+		logger.Debug("uploading a file")
+
+		notes := []string{}
+
+		progressCallbackPut := func(taskType string, processed int64, total int64) {
+			job.Progress(taskType, processed, total, false)
+		}
+
+		job.Progress("upload", 0, sourceStat.Size(), false)
+
+		uploadSourcePath := sourcePath
+
+		// check parent is not available using ticket
+		// parentTargetPath := path.Dir(targetPath)
+		// _, statErr := submit.filesystem.Stat(parentTargetPath)
+		// if statErr != nil {
+		// 	// must exist, mkdir is performed at putDir
+		// 	job.Progress("upload", -1, sourceStat.Size(), true)
+
+		// 	reportSimple(statErr)
+		// 	return errors.Wrapf(statErr, "failed to stat %q", parentTargetPath)
+		// }
+
+		var uploadErr error
+		var uploadResult *irodsclient_fs.FileTransferResult
+
+		notes = append(notes, string(transferMode), fmt.Sprintf("%d threads", threadsRequired))
+
+		retryNum := submit.retryFlagValues.GetRetryNumber()
+		retryInterval := submit.retryFlagValues.GetRetryIntervalSeconds()
+
+		attempt := 0
+		retryErr := retry.Do(func() error {
+			attempt++
+			if attempt > 1 {
+				logger.Debugf("retrying upload attempt %d/%d for %q", attempt, retryNum+1, sourcePath)
+			}
+
+			switch transferMode {
+			case transfer.TransferModeWebDAV:
+				// this may not work with ticket
+				uploadResult, uploadErr = submit.webdavClient.UploadFile(uploadSourcePath, targetPath, "", true, progressCallbackPut)
+			case transfer.TransferModeICAT:
+				fallthrough
+			default:
+				uploadResult, uploadErr = submit.filesystem.UploadFileParallel(uploadSourcePath, targetPath, "", threadsRequired, false, true, progressCallbackPut)
+			}
+			return uploadErr
+		}, retry.Attempts(uint(retryNum+1)), retry.Delay(retryInterval), retry.LastErrorOnly(true))
+
+		if retryErr != nil {
+			job.Progress("upload", -1, sourceStat.Size(), true)
+			job.Progress("checksum", -1, sourceStat.Size(), true)
+
+			reportTransfer(uploadResult, retryErr, notes...)
+			return errors.Wrapf(retryErr, "failed to upload %q to %q after %d attempts", sourcePath, targetPath, retryNum+1)
+		}
+
+		submit.totalUploadedFiles++
+		submit.totalUploadedBytes += sourceStat.Size()
+
+		reportTransfer(uploadResult, nil, notes...)
+
+		logger.Debug("uploaded a file")
+		return nil
+	}
+
+	submit.parallelTransferJobManager.Schedule(sourcePath, submitTask, threadsRequired, progress.UnitsBytes)
+	logger.Debugf("scheduled a file upload, %d threads", threadsRequired)
+
+	return nil
+}
+
+func (submit *SubmitCommand) determineTransferMethod(size int64) (transfer.TransferMode, int) {
+	logger := log.WithFields(log.Fields{})
+
+	threads := parallel.CalculateThreadForTransferJob(size, submit.parallelTransferFlagValues.ThreadNumberPerFile)
 
 	// determine how to upload
-	if submit.parallelTransferFlagValues.SingleThread || submit.parallelTransferFlagValues.ThreadNumber == 1 || submit.parallelTransferFlagValues.ThreadNumberPerFile == 1 {
-		return 1
-	} else if submit.parallelTransferFlagValues.Icat && !submit.filesystem.SupportParallelUpload() {
-		return 1
-	} else if submit.parallelTransferFlagValues.RedirectToResource || submit.parallelTransferFlagValues.Icat {
-		return threads
+	if submit.parallelTransferFlagValues.SingleThread || submit.parallelTransferFlagValues.ThreadNumber <= 2 || submit.parallelTransferFlagValues.ThreadNumberPerFile == 1 || !submit.filesystem.SupportParallelUpload() {
+		threads = 1
 	}
 
-	//if size < commons.RedirectToResourceMinSize && !put.filesystem.SupportParallelUpload() {
-	//	// icat
-	//	return 1
-	//}
-
-	if !submit.filesystem.SupportParallelUpload() {
-		return 1
-	}
-
-	return threads
-}
-
-func (submit *SubmitCommand) determineTransferMode(size int64) commons.TransferMode {
-	if submit.parallelTransferFlagValues.RedirectToResource {
-		return commons.TransferModeRedirect
-	} else if submit.parallelTransferFlagValues.Icat {
-		return commons.TransferModeICAT
-	}
-
-	// auto
-	//if size >= commons.RedirectToResourceMinSize {
-	//	return commons.TransferModeRedirect
-	//}
-
-	return commons.TransferModeICAT
+	// we don't support webdav transfer here
+	logger.Info("using ICAT transfer for uploading a data object")
+	return transfer.TransferModeICAT, threads
 }

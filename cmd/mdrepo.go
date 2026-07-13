@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/cmd/subcmd"
 	"github.com/MD-Repo/md-repo-cli/commons"
+	"github.com/MD-Repo/md-repo-cli/commons/terminal"
+	"github.com/MD-Repo/md-repo-cli/commons/types"
+	"github.com/MD-Repo/md-repo-cli/commons/upgrade"
 	"github.com/cockroachdb/errors"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	log "github.com/sirupsen/logrus"
@@ -16,7 +20,7 @@ import (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:           "mdrepo [subcommand]",
+	Use:           "mdrepo <subcommand> [flags]",
 	Short:         fmt.Sprintf("MD-Repo command-line tool (%s)", commons.GetClientVersion()),
 	RunE:          processCommand,
 	SilenceUsage:  true,
@@ -34,7 +38,10 @@ func Execute() error {
 }
 
 func processCommand(command *cobra.Command, args []string) error {
-	logger := log.WithFields(log.Fields{})
+	logger := log.WithFields(log.Fields{
+		"command": command.Name(),
+		"args":    args,
+	})
 
 	cont, err := flag.ProcessCommonFlags(command)
 	if err != nil {
@@ -52,17 +59,16 @@ func processCommand(command *cobra.Command, args []string) error {
 }
 
 func main() {
-	commons.InitTerminalOutput()
+	terminal.InitTerminalOutput()
 
 	log.SetFormatter(&log.TextFormatter{
 		TimestampFormat: "2006-01-02 15:04:05.000",
 		FullTimestamp:   true,
 	})
 
-	log.SetReportCaller(true)
-
 	log.SetLevel(log.FatalLevel)
-	log.SetOutput(commons.GetTerminalWriter())
+	log.SetReportCaller(true)
+	log.SetOutput(terminal.GetTerminalWriter())
 
 	logger := log.WithFields(log.Fields{})
 
@@ -76,240 +82,240 @@ func main() {
 	subcmd.AddUpgradeCommand(rootCmd)
 
 	// check for a new release in the background while the command runs
-	type releaseResult struct {
-		version string
-		err     error
-	}
-	releaseCh := make(chan releaseResult, 1)
+	notifyIfNewRelease := func() {} // do nothing
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
 	go func() {
-		release, err := commons.CheckNewRelease()
+		defer wg.Done()
+		release, err := upgrade.CheckNewRelease()
 		if err != nil {
-			releaseCh <- releaseResult{err: err}
+			if commons.HasNewRelease(commons.GetClientVersion(), release.Version()) {
+				// found a new release
+				notifyIfNewRelease = func() {
+					terminal.Printf("A newer version v%s is available. Run 'mdrepo upgrade' to update.\n", release.Version())
+				}
+			}
 			return
 		}
-		releaseCh <- releaseResult{version: release.Version()}
 	}()
-
-	notifyIfNewRelease := func() {
-		select {
-		case result := <-releaseCh:
-			if result.err == nil && commons.HasNewRelease(commons.GetClientVersion(), result.version) {
-				commons.Printf("A newer version v%s is available. Run 'mdrepo upgrade' to update.\n", result.version)
-			}
-		default:
-		}
-	}
 
 	err := Execute()
 	if err != nil {
 		logger.Errorf("%+v", err)
 
 		if flag.GetCommonFlagValues(rootCmd).DebugMode {
-			commons.PrintErrorf("%+v\n", err)
+			terminal.PrintErrorf("%+v\n", err)
 		}
 
 		if os.IsNotExist(err) {
-			commons.PrintErrorf("File or directory not found!\n")
+			terminal.PrintErrorf("File or directory not found!\n")
 		} else if irodsclient_types.IsConnectionConfigError(err) {
 			var connectionConfigError *irodsclient_types.ConnectionConfigError
 			if errors.As(err, &connectionConfigError) {
-				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server (host: %q, port: %d)!\nWrong MD-Repo data server configuration.\n", connectionConfigError.Account.Host, connectionConfigError.Account.Port)
+				terminal.PrintErrorf("Failed to establish a connection to MD-Repo data server (host: %q, port: %d)!\nWrong MD-Repo data server configuration.\n", connectionConfigError.Account.Host, connectionConfigError.Account.Port)
 			} else {
-				commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\nWrong MD-Repo data server configuration.\n")
+				terminal.PrintErrorf("Failed to establish a connection to MD-Repo data server!\nWrong MD-Repo data server configuration.\n")
 			}
 		} else if irodsclient_types.IsConnectionError(err) {
 			printIRODSNetworkError()
 		} else if irodsclient_types.IsConnectionPoolFullError(err) {
 			var connectionPoolFullError *irodsclient_types.ConnectionPoolFullError
 			if errors.As(err, &connectionPoolFullError) {
-				commons.PrintErrorf("Failed to establish a new connection to MD-Repo data server as connection pool is full (occupied: %d, max: %d)!\n", connectionPoolFullError.Occupied, connectionPoolFullError.Max)
+				terminal.PrintErrorf("Failed to establish a new connection to MD-Repo data server as connection pool is full (occupied: %d, max: %d)!\n", connectionPoolFullError.Occupied, connectionPoolFullError.Max)
 			} else {
-				commons.PrintErrorf("Failed to establish a new connection to MD-Repo data server as connection pool is full!\n")
+				terminal.PrintErrorf("Failed to establish a new connection to MD-Repo data server as connection pool is full!\n")
 			}
 		} else if irodsclient_types.IsAuthError(err) {
 			var authError *irodsclient_types.AuthError
 			if errors.As(err, &authError) {
-				commons.PrintErrorf("Authentication failed (auth scheme: %q, username: %q, zone: %q)!\n", authError.Config.AuthenticationScheme, authError.Config.ClientUser, authError.Config.ClientZone)
+				terminal.PrintErrorf("Authentication failed (auth scheme: %q, username: %q, zone: %q)!\n", authError.Config.AuthenticationScheme, authError.Config.ClientUser, authError.Config.ClientZone)
 			} else {
-				commons.PrintErrorf("Authentication failed!\n")
+				terminal.PrintErrorf("Authentication failed!\n")
 			}
 		} else if irodsclient_types.IsFileNotFoundError(err) {
 			var fileNotFoundError *irodsclient_types.FileNotFoundError
 			if errors.As(err, &fileNotFoundError) {
-				commons.PrintErrorf("File or directory %q is not found!\n", fileNotFoundError.Path)
+				terminal.PrintErrorf("File or directory %q is not found!\n", fileNotFoundError.Path)
 			} else {
-				commons.PrintErrorf("File or directory is not found!\n")
+				terminal.PrintErrorf("File or directory is not found!\n")
 			}
 		} else if irodsclient_types.IsCollectionNotEmptyError(err) {
 			var collectionNotEmptyError *irodsclient_types.CollectionNotEmptyError
 			if errors.As(err, &collectionNotEmptyError) {
-				commons.PrintErrorf("Directory %q is not empty!\n", collectionNotEmptyError.Path)
+				terminal.PrintErrorf("Directory %q is not empty!\n", collectionNotEmptyError.Path)
 			} else {
-				commons.PrintErrorf("Directory is not empty!\n")
+				terminal.PrintErrorf("Directory is not empty!\n")
 			}
 		} else if irodsclient_types.IsFileAlreadyExistError(err) {
 			var fileAlreadyExistError *irodsclient_types.FileAlreadyExistError
 			if errors.As(err, &fileAlreadyExistError) {
-				commons.PrintErrorf("File or directory %q already exists!\n", fileAlreadyExistError.Path)
+				terminal.PrintErrorf("File or directory %q already exists!\n", fileAlreadyExistError.Path)
 			} else {
-				commons.PrintErrorf("File or directory already exists!\n")
+				terminal.PrintErrorf("File or directory already exists!\n")
 			}
 		} else if irodsclient_types.IsTicketNotFoundError(err) {
 			var ticketNotFoundError *irodsclient_types.TicketNotFoundError
 			if errors.As(err, &ticketNotFoundError) {
-				commons.PrintErrorf("Ticket %q is not found!\n", ticketNotFoundError.Ticket)
+				terminal.PrintErrorf("Ticket %q is not found!\n", ticketNotFoundError.Ticket)
 			} else {
-				commons.PrintErrorf("Ticket is not found!\n")
+				terminal.PrintErrorf("Ticket is not found!\n")
 			}
 		} else if irodsclient_types.IsUserNotFoundError(err) {
 			var userNotFoundError *irodsclient_types.UserNotFoundError
 			if errors.As(err, &userNotFoundError) {
-				commons.PrintErrorf("User %q is not found!\n", userNotFoundError.Name)
+				terminal.PrintErrorf("User %q is not found!\n", userNotFoundError.Name)
 			} else {
-				commons.PrintErrorf("User is not found!\n")
+				terminal.PrintErrorf("User is not found!\n")
 			}
 		} else if irodsclient_types.IsIRODSError(err) {
 			var irodsError *irodsclient_types.IRODSError
 			if errors.As(err, &irodsError) {
-				commons.PrintErrorf("MD-Repo data server error (code: '%d', message: %q)\n", irodsError.Code, irodsError.Error())
+				terminal.PrintErrorf("MD-Repo data server error (code: '%d', message: %q)\n", irodsError.Code, irodsError.Error())
 			} else {
-				commons.PrintErrorf("MD-Repo data server error!\n")
+				terminal.PrintErrorf("MD-Repo data server error!\n")
 			}
-		} else if commons.IsDialHTTPError(err) {
-			var dialHTTPError *commons.DialHTTPError
-			if errors.As(err, &dialHTTPError) {
-				printMDRepoServerNetworkError(dialHTTPError.URL)
-			} else {
-				printMDRepoServerNetworkError("")
-			}
-		} else if commons.IsWebDAVError(err) {
-			var webDAVError *commons.WebDAVError
+		} else if types.IsWebDAVError(err) {
+			var webDAVError *types.WebDAVError
 			if errors.As(err, &webDAVError) {
 				printWebdavError(webDAVError.URL, webDAVError.ErrorCode)
 			} else {
 				printWebdavError("", 0)
 			}
-		} else if commons.IsInvalidTicketError(err) {
-			var invalidTicketError *commons.InvalidTicketError
+		} else if types.IsInvalidTicketError(err) {
+			var invalidTicketError *types.InvalidTicketError
 			if errors.As(err, &invalidTicketError) {
-				commons.PrintErrorf("MD-Repo ticket %q is invalid!\n", invalidTicketError.Ticket)
+				terminal.PrintErrorf("MD-Repo ticket %q is invalid!\n", invalidTicketError.Ticket)
 			} else {
-				commons.PrintErrorf("MD-Repo ticket is invalid!\n")
+				terminal.PrintErrorf("MD-Repo ticket is invalid!\n")
 			}
-		} else if errors.Is(err, commons.TokenNotProvidedError) {
-			commons.PrintErrorf("MD-Repo token is not provided!\n")
-		} else if commons.IsMDRepoServiceError(err) {
-			var serviceError *commons.MDRepoServiceError
+		} else if types.IsTokenNotProvidedError(err) {
+			var tokenNotProvidedError *types.TokenNotProvidedError
+			if errors.As(err, &tokenNotProvidedError) {
+				terminal.PrintErrorf("MD-Repo token is not provided!\n")
+			} else {
+				terminal.PrintErrorf("MD-Repo token is not provided!\n")
+			}
+		} else if types.IsMDRepoServiceError(err) {
+			var serviceError *types.MDRepoServiceError
 			if errors.As(err, &serviceError) {
-				commons.PrintErrorf("%s\n", serviceError.Message)
+				terminal.PrintErrorf("%s\n", serviceError.Message)
 			} else {
-				commons.PrintErrorf("MD-Repo service error!\nMD-Repo server might be temporarily unavailable.\nPlease try again in a few minutes.\n")
+				terminal.PrintErrorf("MD-Repo service error!\nMD-Repo server might be temporarily unavailable.\nPlease try again in a few minutes.\n")
 			}
-		} else if commons.IsInvalidSubmitMetadataError(err) {
-			var submitMetadataError *commons.InvalidSubmitMetadataError
+		} else if types.IsInvalidOrcIDError(err) {
+			var invalidOrcIDError *types.InvalidOrcIDError
+			if errors.As(err, &invalidOrcIDError) {
+				terminal.PrintErrorf("Invalid ORC-ID: %q (expected %q)\n", invalidOrcIDError.FoundOrcID, invalidOrcIDError.RequestedOrcID)
+			} else {
+				terminal.PrintErrorf("Invalid ORC-ID\n")
+			}
+		} else if types.IsInvalidSubmitMetadataError(err) {
+			var submitMetadataError *types.InvalidSubmitMetadataError
 			if errors.As(err, &submitMetadataError) {
-				commons.PrintErrorf("%s", submitMetadataError.Error())
+				terminal.PrintErrorf("%s", submitMetadataError.Error())
 			} else {
-				commons.PrintErrorf("submit metadata error!\n")
+				terminal.PrintErrorf("submit metadata error!\n")
 			}
-		} else if commons.IsSimulationNoNotMatchingError(err) {
-			var matchingError *commons.SimulationNoNotMatchingError
+		} else if types.IsSimulationNoNotMatchingError(err) {
+			var matchingError *types.SimulationNoNotMatchingError
 			if errors.As(err, &matchingError) {
-				commons.PrintErrorf("MD-Repo simulation number not matching error!\n")
-				commons.PrintErrorf("%s\n", matchingError.Error())
+				terminal.PrintErrorf("MD-Repo simulation number not matching error!\n")
+				terminal.PrintErrorf("%s\n", matchingError.Error())
 
 				if len(matchingError.ValidSimulationPaths) > 0 {
-					commons.PrintErrorf("the simulations found:\n")
+					terminal.PrintErrorf("the simulations found:\n")
 					for sourceIdx, sourcePath := range matchingError.ValidSimulationPaths {
-						commons.PrintErrorf("[%d] %s\n", sourceIdx+1, sourcePath)
+						terminal.PrintErrorf("[%d] %s\n", sourceIdx+1, sourcePath)
 					}
 				}
 
 				if len(matchingError.InvalidSimulationPaths) > 0 {
-					commons.PrintErrorf("the directories ignored due to lack of metadata file:\n")
+					terminal.PrintErrorf("the directories ignored due to lack of metadata file:\n")
 					for sourceIdx, sourcePath := range matchingError.InvalidSimulationPaths {
 						if len(matchingError.InvalidSimulationPathsErrors) > sourceIdx {
-							commons.PrintErrorf("[%d] %s: %s\n", sourceIdx+1, sourcePath, matchingError.InvalidSimulationPathsErrors[sourceIdx])
+							terminal.PrintErrorf("[%d] %s: %s\n", sourceIdx+1, sourcePath, matchingError.InvalidSimulationPathsErrors[sourceIdx])
 						} else {
-							commons.PrintErrorf("[%d] %s\n", sourceIdx+1, sourcePath)
+							terminal.PrintErrorf("[%d] %s\n", sourceIdx+1, sourcePath)
 						}
 					}
 				}
 			} else {
-				commons.PrintErrorf("MD-Repo simulation number not matching error!\n")
+				terminal.PrintErrorf("MD-Repo simulation number not matching error!\n")
 			}
-		} else if commons.IsNotDirError(err) {
-			var notDirError *commons.NotDirError
+		} else if types.IsNotDirError(err) {
+			var notDirError *types.NotDirError
 			if errors.As(err, &notDirError) {
-				commons.PrintErrorf("Destination %q is not a directory!\n", notDirError.Path)
+				terminal.PrintErrorf("Destination %q is not a directory!\n", notDirError.Path)
 			} else {
-				commons.PrintErrorf("Destination is not a directory!\n")
+				terminal.PrintErrorf("Destination is not a directory!\n")
 			}
-		} else if commons.IsNotFileError(err) {
-			var notFileError *commons.NotFileError
+		} else if types.IsNotFileError(err) {
+			var notFileError *types.NotFileError
 			if errors.As(err, &notFileError) {
-				commons.PrintErrorf("Path %q is not a file!\n", notFileError.Path)
+				terminal.PrintErrorf("Destination %q is not a file!\n", notFileError.Path)
 			} else {
-				commons.PrintErrorf("Path is not a file!\n")
+				terminal.PrintErrorf("Destination is not a file!\n")
 			}
 		} else {
-			commons.PrintErrorf("Unexpected error!\nError Trace:\n  - %+v\n", err)
+			terminal.PrintErrorf("Unexpected error!\nError Trace:\n  - %+v\n", err)
 		}
-
-		notifyIfNewRelease()
-		os.Exit(1)
 	}
 
+	wg.Wait()
 	notifyIfNewRelease()
+
+	if err != nil {
+		os.Exit(1)
+	}
 }
 
 func printIRODSNetworkError() {
-	commons.PrintErrorf("Failed to establish a connection to MD-Repo data server!\n")
+	terminal.PrintErrorf("Failed to establish a connection to MD-Repo data server!\n")
 
 	// check if internet works
 	_, err := http.Get("https://www.google.com")
 	if err != nil {
-		commons.PrintErrorf("No Internet access.\nCheck internet connectivity.\n")
+		terminal.PrintErrorf("No Internet access.\nCheck internet connectivity.\n")
 		return
 	}
-	commons.Printf("Tested Internet access via www.google.com - OK.\n")
+	terminal.Printf("Tested Internet access via www.google.com - OK.\n")
 
 	// check if datastore is under maintenance
 	_, err = http.Get("https://data.cyverse.org/dav/iplant/commons/community_released")
 	if err != nil {
-		commons.PrintErrorf("MD-Repo data server might be temporarily unavailable.\nCheck if CyVerse Data Store is under maintenance.\nhttps://cyverse.org/maintenance\n")
+		terminal.PrintErrorf("MD-Repo data server might be temporarily unavailable.\nCheck if CyVerse Data Store is under maintenance.\nhttps://cyverse.org/maintenance\n")
 		return
 	}
-	commons.Printf("Tested MD-Repo data server access via https://data.cyverse.org - OK.\n")
+	terminal.Printf("Tested MD-Repo data server access via https://data.cyverse.org - OK.\n")
 
-	commons.PrintErrorf("Verify that your firewall allows access on port 1247 (perhaps request this from network admin)\n")
+	terminal.PrintErrorf("Verify that your firewall allows access on port 1247 (perhaps request this from network admin)\n")
 }
 
 func printMDRepoServerNetworkError(url string) {
-	commons.PrintErrorf("Failed to establish a HTTP connection to MD-Repo server %s!\n", url)
+	terminal.PrintErrorf("Failed to establish a HTTP connection to MD-Repo server %s!\n", url)
 
 	// check if internet works
 	_, err := http.Get("https://www.google.com")
 	if err != nil {
-		commons.PrintErrorf("No Internet access.\nCheck internet connectivity.\n")
+		terminal.PrintErrorf("No Internet access.\nCheck internet connectivity.\n")
 		return
 	}
-	commons.Printf("Tested Internet access via www.google.com - OK.\n")
+	terminal.Printf("Tested Internet access via www.google.com - OK.\n")
 }
 
 func printWebdavError(url string, errorCode int) {
 	if url == "" || errorCode == 0 {
-		commons.PrintErrorf("Failed to access MD-Repo server via WebDAV protocol.\n")
+		terminal.PrintErrorf("Failed to access MD-Repo server via WebDAV protocol.\n")
 		return
 	}
 
-	commons.PrintErrorf("Failed to access MD-Repo server %q via WebDAV protocol (error code: %d).\n", url, errorCode)
+	terminal.PrintErrorf("Failed to access MD-Repo server %q via WebDAV protocol (error code: %d).\n", url, errorCode)
 
 	if errorCode == http.StatusForbidden {
-		commons.PrintErrorf("Your MD-Repo server access might be blocked.\n")
+		terminal.PrintErrorf("Your MD-Repo server access might be blocked.\n")
 
-		commons.PrintErrorf("Your IP address might be blocked.\nVisit 'https://unblockme.cyverse.org' to unblock your IP address.\nPlease contact us at 'help@mdrepo.org' if it did not help.\n")
+		terminal.PrintErrorf("Your IP address might be blocked.\nVisit 'https://unblockme.cyverse.org' to unblock your IP address.\nPlease contact us at 'help@mdrepo.org' if it did not help.\n")
 		return
 	}
 }
-

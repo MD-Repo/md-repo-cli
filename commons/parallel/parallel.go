@@ -5,8 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/MD-Repo/md-repo-cli/commons/terminal"
 	"github.com/cockroachdb/errors"
-	"github.com/cyverse/gocommands/commons/terminal"
 	"github.com/jedib0t/go-pretty/v6/progress"
 	log "github.com/sirupsen/logrus"
 )

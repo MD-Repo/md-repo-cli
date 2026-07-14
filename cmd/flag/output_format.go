@@ -1,7 +1,7 @@
 package flag
 
 import (
-	"github.com/cyverse/gocommands/commons/format"
+	"github.com/MD-Repo/md-repo-cli/commons/format"
 	"github.com/spf13/cobra"
 )
 

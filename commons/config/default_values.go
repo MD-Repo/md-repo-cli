@@ -36,7 +36,7 @@ const (
 	MDRepoGetTicketApi      string = "/api/v1/get_ticket"
 	MDRepoVerifyMetadataApi string = "/api/v1/verify_metadata"
 
-	MaxSimulationSubmissionSize string = "40GiB"
+	MaxSimulationSubmissionSize string = "40GB"
 )
 
 func GetDefaultFilesystemTimeoutInSeconds() int {

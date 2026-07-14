@@ -60,6 +60,7 @@ func GetIRODSFSClientForLargeFileIO(account *irodsclient_types.IRODSAccount, max
 		fsConfig.Cache.Timeout = infiniteDuration
 		fsConfig.Cache.CleanupTime = infiniteDuration
 		fsConfig.Cache.InvalidateParentEntryCacheImmediately = true
+		fsConfig.Cache.StartNewTransaction = false
 	}
 
 	// set operation time out

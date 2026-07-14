@@ -230,6 +230,8 @@ func (get *GetCommand) processTicket(mdRepoTicket *mdrepo.MDRepoTicket) error {
 	get.parallelTransferJobManager = parallel.NewParallelJobManager(ioSession.GetMaxConnections(), !get.progressFlagValues.NoProgress, get.progressFlagValues.ShowFullPath, get.parallelTransferFlagValues.StopOnError)
 
 	// run
+	terminal.Printf("scheduling transfer...\n")
+
 	// we create a subdir for ticket
 	dataRelPath, err := mdrepo.GetMDRepoSimulationRelPath(mdRepoTicket.IRODSDataPath)
 	if err != nil {
@@ -248,10 +250,14 @@ func (get *GetCommand) processTicket(mdRepoTicket *mdrepo.MDRepoTicket) error {
 		return errors.Wrapf(err, "failed to get %q to %q", mdRepoTicket.IRODSDataPath, dataTargetPath)
 	}
 
+	terminal.Printf("start transfer...\n")
+
 	transferErr := get.parallelTransferJobManager.Start()
 	if transferErr != nil {
 		return errors.Wrap(transferErr, "failed to perform transfer jobs")
 	}
+
+	terminal.Printf("done transfer...\n")
 
 	return nil
 }

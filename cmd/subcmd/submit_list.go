@@ -11,6 +11,7 @@ import (
 	"github.com/MD-Repo/md-repo-cli/commons"
 	"github.com/MD-Repo/md-repo-cli/commons/checksum"
 	"github.com/MD-Repo/md-repo-cli/commons/config"
+	"github.com/MD-Repo/md-repo-cli/commons/format"
 	"github.com/MD-Repo/md-repo-cli/commons/irods"
 	"github.com/MD-Repo/md-repo-cli/commons/mdrepo"
 	"github.com/MD-Repo/md-repo-cli/commons/path"
@@ -21,7 +22,6 @@ import (
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_irodsfs "github.com/cyverse/go-irodsclient/irods/fs"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
-	"github.com/cyverse/gocommands/commons/format"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )

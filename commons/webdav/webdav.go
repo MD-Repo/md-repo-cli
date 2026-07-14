@@ -12,12 +12,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/MD-Repo/md-repo-cli/commons/types"
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_common "github.com/cyverse/go-irodsclient/irods/common"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	"github.com/cyverse/go-irodsclient/irods/util"
 	irodsclient_util "github.com/cyverse/go-irodsclient/irods/util"
-	"github.com/cyverse/gocommands/commons/types"
 	log "github.com/sirupsen/logrus"
 	"github.com/studio-b12/gowebdav"
 )

@@ -1,7 +1,6 @@
 package subcmd
 
 import (
-	"bytes"
 	"encoding/hex"
 	"fmt"
 	"io/fs"
@@ -94,6 +93,8 @@ type SubmitCommand struct {
 	totalUploadedFiles int
 	totalUploadedBytes int64
 	startTime          time.Time
+
+	fileHashes map[string]string // file path -> md5 hash
 }
 
 func NewSubmitCommand(command *cobra.Command, args []string) (*SubmitCommand, error) {
@@ -113,6 +114,8 @@ func NewSubmitCommand(command *cobra.Command, args []string) (*SubmitCommand, er
 		totalUploadedFiles: 0,
 		totalUploadedBytes: 0,
 		startTime:          time.Now(),
+
+		fileHashes: map[string]string{},
 	}
 
 	submit.maxConnectionNum = submit.parallelTransferFlagValues.ThreadNumber
@@ -312,12 +315,16 @@ func (submit *SubmitCommand) processTicket(sourcePath string, mdRepoTicket *mdre
 	submit.submitStatusFileWriter = mdrepo.NewSubmitStatusFileWriter(submit.filesystem, submit.config.Token, targetPath)
 
 	// run
+	terminal.Printf("scheduling transfer...\n")
+
 	err = submit.submitOne(mdRepoTicket, sourcePath)
 	if err != nil {
 		submit.submitStatusFileWriter.SetErrored()
 		submit.submitStatusFileWriter.CreateStatusFile()
 		return errors.Wrapf(err, "Failed to submit %q to %q", sourcePath, targetPath)
 	}
+
+	terminal.Printf("start transfer...\n")
 
 	// create a in-progress status file
 	submit.submitStatusFileWriter.SetInProgress()
@@ -339,6 +346,9 @@ func (submit *SubmitCommand) processTicket(sourcePath string, mdRepoTicket *mdre
 
 	// set completed
 	submit.submitStatusFileWriter.SetCompleted()
+
+	terminal.Printf("done transfer...\n")
+
 	return nil
 }
 
@@ -419,6 +429,10 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 			}
 
 			filePath := filepath.Join(validSourcePath, entry.Name())
+			absFilePath, err := filepath.Abs(filePath)
+			if err != nil {
+				return nil, nil, nil, "", errors.Wrapf(err, "Failed to get absolute path for %q", filePath)
+			}
 
 			info, err := entry.Info()
 			if err != nil {
@@ -429,13 +443,16 @@ func (submit *SubmitCommand) scanSourcePaths(orcID string) ([]string, []string, 
 				return nil, nil, nil, "", errors.Errorf("file %q is empty", filePath)
 			}
 
-			hash, err := irodsclient_util.HashLocalFile(filePath, "md5", nil)
+			hash, err := irodsclient_util.HashLocalFile(absFilePath, "md5", nil)
 			if err != nil {
 				return nil, nil, nil, "", errors.Wrapf(err, "Failed to compute MD5 for %q", filePath)
 			}
 
 			hashStr := hex.EncodeToString(hash)
 			hashToFiles[hashStr] = append(hashToFiles[hashStr], filePath)
+
+			// store for later use
+			submit.fileHashes[absFilePath] = hashStr
 		}
 	}
 
@@ -528,6 +545,11 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket *mdrepo.MDRepoTicket, source
 
 	for _, sourceFile := range sourceFiles {
 		sourceFileAbsPath := filepath.Join(metadata.SubmissionPath, sourceFile)
+		sourceFileAbsPath, err = filepath.Abs(sourceFileAbsPath)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to get absolute path for %q", sourceFileAbsPath)
+		}
+
 		sourceFileStat, err := os.Stat(sourceFileAbsPath)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to stat source file %q", sourceFileAbsPath)
@@ -541,15 +563,22 @@ func (submit *SubmitCommand) submitOne(mdRepoTicket *mdrepo.MDRepoTicket, source
 		}
 
 		// add status entry
-		hash, err := irodsclient_util.HashLocalFile(sourcePath, "md5", nil)
-		if err != nil {
-			return errors.Wrapf(err, "Failed to get hash for %q", sourcePath)
+		hashStr := ""
+		if hash, ok := submit.fileHashes[sourceFileAbsPath]; ok {
+			hashStr = hash
+		} else {
+			hash, err := irodsclient_util.HashLocalFile(sourceFileAbsPath, "md5", nil)
+			if err != nil {
+				return errors.Wrapf(err, "Failed to get hash for %q", sourceFileAbsPath)
+			}
+
+			hashStr = hex.EncodeToString(hash)
 		}
 
 		submitStatusEntry := mdrepo.SubmitStatusEntry{
 			IRODSPath: commons_path.GetIRODSRelativePath(targetPath, targetFilePath),
-			Size:      sourceStat.Size(),
-			MD5Hash:   hex.EncodeToString(hash),
+			Size:      sourceFileStat.Size(),
+			MD5Hash:   hashStr,
 		}
 		submit.submitStatusFileWriter.AddFile(submitStatusEntry)
 	}
@@ -629,12 +658,24 @@ func (submit *SubmitCommand) submitFile(mdRepoTicket *mdrepo.MDRepoTicket, sourc
 		if targetEntry.Size == sourceStat.Size() {
 			// compare hash
 			if len(targetEntry.CheckSum) > 0 {
-				localChecksum, err := irodsclient_util.HashLocalFile(sourcePath, string(targetEntry.CheckSumAlgorithm), nil)
+				sourceFileAbsPath, err := filepath.Abs(sourcePath)
 				if err != nil {
-					return errors.Wrapf(err, "Failed to get hash for %q", sourcePath)
+					return errors.Wrapf(err, "Failed to get absolute path for %q", sourcePath)
 				}
 
-				if bytes.Equal(localChecksum, targetEntry.CheckSum) {
+				hashStr := ""
+				if hash, ok := submit.fileHashes[sourceFileAbsPath]; ok {
+					hashStr = hash
+				} else {
+					hash, err := irodsclient_util.HashLocalFile(sourcePath, string(targetEntry.CheckSumAlgorithm), nil)
+					if err != nil {
+						return errors.Wrapf(err, "Failed to get hash for %q", sourcePath)
+					}
+
+					hashStr = hex.EncodeToString(hash)
+				}
+
+				if hashStr == hex.EncodeToString(targetEntry.CheckSum) {
 					// skip
 					now := time.Now()
 					reportFile := &transfer.TransferReportFile{
@@ -644,7 +685,7 @@ func (submit *SubmitCommand) submitFile(mdRepoTicket *mdrepo.MDRepoTicket, sourc
 						SourcePath:              sourcePath,
 						SourceSize:              sourceStat.Size(),
 						SourceChecksumAlgorithm: string(targetEntry.CheckSumAlgorithm),
-						SourceChecksum:          hex.EncodeToString(localChecksum),
+						SourceChecksum:          hashStr,
 						DestPath:                targetEntry.Path,
 						DestSize:                targetEntry.Size,
 						DestChecksum:            hex.EncodeToString(targetEntry.CheckSum),

@@ -1,7 +1,8 @@
 package flag
 
 import (
-	"github.com/MD-Repo/md-repo-cli/commons"
+	"github.com/MD-Repo/md-repo-cli/commons/config"
+	"github.com/MD-Repo/md-repo-cli/commons/types"
 	"github.com/spf13/cobra"
 )
 
@@ -11,50 +12,43 @@ type ParallelTransferFlagValues struct {
 	ThreadNumberPerFile int
 	TCPBufferSize       int
 	tcpBufferSizeInput  string
-	RedirectToResource  bool
 	Icat                bool
 	WebDAV              bool
+	StopOnError         bool
 }
 
 var (
 	parallelTransferFlagValues ParallelTransferFlagValues
 )
 
-func SetParallelTransferFlags(command *cobra.Command, hideParallelConfig bool, hideSingleThread bool, hideWebDAV bool) {
-	command.Flags().IntVar(&parallelTransferFlagValues.ThreadNumber, "thread_num", commons.GetDefaultTransferThreadNum(), "Set the total number of transfer threads")
-	command.Flags().IntVar(&parallelTransferFlagValues.ThreadNumberPerFile, "thread_num_per_file", commons.GetDefaultTransferThreadNumPerFile(), "Set the number of transfer threads for each file")
-	command.Flags().StringVar(&parallelTransferFlagValues.tcpBufferSizeInput, "tcp_buffer_size", commons.GetDefaultTCPBufferSizeString(), "Set the TCP socket buffer size")
-	command.Flags().BoolVar(&parallelTransferFlagValues.RedirectToResource, "redirect", false, "Enable transfer redirection to the resource server")
+func SetParallelTransferFlags(command *cobra.Command, hideParallelConfig bool, hideSingleThread bool) {
+	command.Flags().IntVar(&parallelTransferFlagValues.ThreadNumber, "thread_num", config.GetDefaultTransferThreadNum(), "Set the total number of transfer threads")
+	command.Flags().IntVar(&parallelTransferFlagValues.ThreadNumberPerFile, "thread_num_per_file", config.GetDefaultTransferThreadNumPerFile(), "Set the number of transfer threads for each file")
+	command.Flags().StringVar(&parallelTransferFlagValues.tcpBufferSizeInput, "tcp_buffer_size", config.GetDefaultTCPBufferSizeString(), "Set the TCP socket buffer size")
 	command.Flags().BoolVar(&parallelTransferFlagValues.Icat, "icat", false, "Use iCAT for file transfers")
-	command.Flags().BoolVar(&parallelTransferFlagValues.WebDAV, "webdav", false, "Use WebDAV for file downloads")
 	command.Flags().BoolVar(&parallelTransferFlagValues.SingleThread, "single_threaded", false, "Force single-threaded file transfer")
+	command.Flags().BoolVar(&parallelTransferFlagValues.WebDAV, "webdav", false, "Use WebDAV protocol (HTTP) for transfer")
+	command.Flags().BoolVar(&parallelTransferFlagValues.StopOnError, "stop_on_error", false, "Stop all transfers immediately when an error occurs")
 
 	if hideParallelConfig {
 		command.Flags().MarkHidden("thread_num")
 		command.Flags().MarkHidden("thread_num_per_file")
 		command.Flags().MarkHidden("tcp_buffer_size")
-		command.Flags().MarkHidden("redirect")
 		command.Flags().MarkHidden("icat")
 		command.Flags().MarkHidden("single_threaded")
+		command.Flags().MarkHidden("webdav")
 	}
 
 	if hideSingleThread {
 		command.Flags().MarkHidden("single_threaded")
 	}
 
-	if hideWebDAV {
-		command.Flags().MarkHidden("webdav")
-	}
-
-	command.MarkFlagsMutuallyExclusive("redirect", "single_threaded")
-	command.MarkFlagsMutuallyExclusive("redirect", "icat", "webdav")
+	command.MarkFlagsMutuallyExclusive("icat", "webdav")
 }
 
 func GetParallelTransferFlagValues() *ParallelTransferFlagValues {
-	size, err := commons.ParseSize(parallelTransferFlagValues.tcpBufferSizeInput)
-	if err == nil {
-		parallelTransferFlagValues.TCPBufferSize = int(size)
-	}
+	size, _ := types.ParseSize(parallelTransferFlagValues.tcpBufferSizeInput)
+	parallelTransferFlagValues.TCPBufferSize = int(size)
 
 	if parallelTransferFlagValues.ThreadNumber < 1 {
 		parallelTransferFlagValues.ThreadNumber = 1

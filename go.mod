@@ -10,12 +10,12 @@ require (
 	github.com/cockroachdb/errors v1.12.0
 	github.com/creativeprojects/go-selfupdate v1.5.0
 	github.com/cyverse/go-irodsclient v0.20.1
-	github.com/dustin/go-humanize v1.0.1
+	github.com/cyverse/gocommands v0.12.2
 	github.com/jedib0t/go-pretty/v6 v6.6.7
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
-	github.com/studio-b12/gowebdav v0.10.0
+	github.com/studio-b12/gowebdav v0.12.0
 	golang.org/x/crypto v0.43.0
 	golang.org/x/exp v0.0.0-20240112132812-db7319d0e0e3
 	golang.org/x/term v0.36.0

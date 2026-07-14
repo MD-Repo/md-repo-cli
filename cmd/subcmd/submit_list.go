@@ -4,13 +4,20 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
 	"github.com/MD-Repo/md-repo-cli/commons"
+	"github.com/MD-Repo/md-repo-cli/commons/checksum"
+	"github.com/MD-Repo/md-repo-cli/commons/config"
+	"github.com/MD-Repo/md-repo-cli/commons/format"
+	"github.com/MD-Repo/md-repo-cli/commons/irods"
+	"github.com/MD-Repo/md-repo-cli/commons/mdrepo"
+	"github.com/MD-Repo/md-repo-cli/commons/path"
+	commons_path "github.com/MD-Repo/md-repo-cli/commons/path"
+	"github.com/MD-Repo/md-repo-cli/commons/terminal"
+	"github.com/MD-Repo/md-repo-cli/commons/types"
 	"github.com/cockroachdb/errors"
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_irodsfs "github.com/cyverse/go-irodsclient/irods/fs"
@@ -21,7 +28,8 @@ import (
 
 var submitListCmd = &cobra.Command{
 	Use:     "submitls",
-	Short:   "List MD-Repo submission data",
+	Short:   "List MD-Repo data",
+	Long:    `This command lists MD-Repo submission data associated with the given token.`,
 	Aliases: []string{"submit_ls", "list_submission", "list_submit"},
 	RunE:    processSubmitListCommand,
 	Args:    cobra.NoArgs,
@@ -30,7 +38,7 @@ var submitListCmd = &cobra.Command{
 func AddSubmitListCommand(rootCmd *cobra.Command) {
 	// attach common flags
 	flag.SetCommonFlags(submitListCmd)
-
+	flag.SetOutputFormatFlags(submitListCmd, false)
 	flag.SetTokenFlags(submitListCmd)
 	flag.SetSubmissionListFlags(submitListCmd)
 
@@ -49,19 +57,28 @@ func processSubmitListCommand(command *cobra.Command, args []string) error {
 type SubmitListCommand struct {
 	command *cobra.Command
 
+	commonFlagValues         *flag.CommonFlagValues
+	outputFormatFlagValues   *flag.OutputFormatFlagValues
 	tokenFlagValues          *flag.TokenFlagValues
 	submissionListFlagValues *flag.SubmissionListFlagValues
 
 	account    *irodsclient_types.IRODSAccount
 	filesystem *irodsclient_fs.FileSystem
+	config     *config.Config
+
+	dataRootPath string
 }
 
 func NewSubmitListCommand(command *cobra.Command, args []string) (*SubmitListCommand, error) {
 	submitls := &SubmitListCommand{
 		command: command,
 
+		commonFlagValues:         flag.GetCommonFlagValues(command),
+		outputFormatFlagValues:   flag.GetOutputFormatFlagValues(),
 		tokenFlagValues:          flag.GetTokenFlagValues(),
 		submissionListFlagValues: flag.GetSubmissionListFlagValues(),
+
+		config: config.GetConfig(),
 	}
 
 	return submitls, nil
@@ -80,95 +97,222 @@ func (submitls *SubmitListCommand) Process() error {
 		return nil
 	}
 
-	config := commons.GetConfig()
-
 	// handle token
 	if len(submitls.tokenFlagValues.TicketString) > 0 {
-		config.TicketString = submitls.tokenFlagValues.TicketString
+		submitls.config.TicketString = submitls.tokenFlagValues.TicketString
 	}
 
 	if len(submitls.tokenFlagValues.Token) > 0 {
-		config.Token = submitls.tokenFlagValues.Token
+		submitls.config.Token = submitls.tokenFlagValues.Token
 	}
 
 	// handle local flags
-	_, err = commons.InputMissingFields()
+	_, err = config.InputMissingFields()
 	if err != nil {
 		return errors.Wrapf(err, "failed to input missing fields")
 	}
 
-	if len(config.Token) > 0 && len(config.TicketString) == 0 {
+	if len(submitls.config.Token) > 0 && len(submitls.config.TicketString) == 0 {
 		// orcID
 		// override ORC-ID
 		orcID := ""
 		if len(submitls.submissionListFlagValues.OrcID) > 0 {
 			orcID = submitls.submissionListFlagValues.OrcID
 		} else {
-			orcID = commons.InputOrcID()
+			orcID = terminal.Input("Input ORCID")
 		}
 
 		// encrypt
-		tokenBytes, err := commons.Base64Decode(config.Token)
+		tokenBytes, err := checksum.Base64Decode(submitls.config.Token)
 		if err != nil {
 			return errors.Wrapf(err, "failed to decode token using BASE64")
 		}
 
-		newToken, err := commons.HMACStringSHA224(tokenBytes, orcID)
+		newToken, err := checksum.HMACStringSHA224(tokenBytes, orcID)
 		if err != nil {
 			return errors.Wrapf(err, "failed to encrypt token using SHA3-224 HMAC")
 		}
 
 		logger.Debugf("encrypted token: %s", newToken)
 
-		config.TicketString, err = commons.GetMDRepoTicketStringFromToken(submitls.tokenFlagValues.ServiceURL, newToken)
+		submitls.config.TicketString, err = mdrepo.GetMDRepoTicketStringFromToken(submitls.tokenFlagValues.ServiceURL, newToken)
 		if err != nil {
-			return errors.Wrapf(err, "failed to read ticket from token")
+			return errors.Wrapf(err, "failed to read ticket from token %q", newToken)
 		}
 	}
 
-	if len(config.TicketString) == 0 {
-		return commons.TokenNotProvidedError
+	if len(submitls.config.TicketString) == 0 {
+		return types.NewTokenNotProvidedError()
 	}
 
 	// get ticket
-	mdRepoTicket, err := commons.GetMDRepoTicketFromString(config.TicketString)
+	mdRepoTicket, err := mdrepo.GetMDRepoTicketFromString(submitls.config.TicketString)
 	if err != nil {
 		return errors.Wrapf(err, "failed to retrieve ticket")
 	}
 
 	// Create a file system
-	submitls.account, err = commons.GetAccount(&mdRepoTicket)
+	account, err := mdRepoTicket.GetAccount()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get iRODS Account")
 	}
 
-	submitls.filesystem, err = commons.GetIRODSFSClient(submitls.account)
+	submitls.account = account
+
+	submitls.filesystem, err = irods.GetIRODSFSClient(submitls.account, true, submitls.commonFlagValues.Timeout)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get iRODS FS Client")
 	}
 	defer submitls.filesystem.Release()
 
 	// run
-	sourcePath := commons.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
+	outputFormatter := format.NewOutputFormatter(terminal.GetTerminalWriter())
 
-	logger.Debugf("list submission %q  (ticket: %q)", sourcePath, mdRepoTicket.IRODSTicket)
+	sourcePath := commons_path.MakeIRODSLandingPath(mdRepoTicket.IRODSDataPath)
 
-	err = submitls.listOne(sourcePath, sourcePath)
+	submitls.dataRootPath = sourcePath
+
+	logger.Debugf("list submission %q (ticket: %q)", sourcePath, mdRepoTicket.IRODSTicket)
+
+	err = submitls.listSourcePath(outputFormatter, sourcePath)
 	if err != nil {
-		return errors.Wrapf(err, "failed to list %q", sourcePath)
+		return errors.Wrapf(err, "failed to list path %q", sourcePath)
 	}
+
+	outputFormatter.Render(submitls.outputFormatFlagValues.Format)
 
 	return nil
 }
 
-func (submitls *SubmitListCommand) listOne(sourceRootPath string, sourcePath string) error {
+func (submitls *SubmitListCommand) listSourcePath(outputFormatter *format.OutputFormatter, sourcePath string) error {
 	connection, err := submitls.filesystem.GetMetadataConnection(true)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get connection")
 	}
 	defer submitls.filesystem.ReturnMetadataConnection(connection)
 
+	err = submitls.printStatusFile(outputFormatter, sourcePath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to print status file")
+	}
+
+	err = submitls.listCollection(outputFormatter, sourcePath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to list collection %q", sourcePath)
+	}
+
+	return nil
+}
+
+func (submitls *SubmitListCommand) printStatusFile(outputFormatter *format.OutputFormatter, sourcePath string) error {
+	logger := log.WithFields(log.Fields{})
+
+	connection, err := submitls.filesystem.GetMetadataConnection(true)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get connection")
+	}
+	defer submitls.filesystem.ReturnMetadataConnection(connection)
+
+	objs, err := irodsclient_irodsfs.ListDataObjects(connection, sourcePath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to list data-objects in %q", sourcePath)
+	}
+
+	statusFilePath := ""
+
+	// find status file
+	var latestObjs *irodsclient_types.IRODSDataObject
+
+	for _, obj := range objs {
+		if !mdrepo.IsStatusFile(obj.Name) {
+			continue
+		}
+
+		if len(obj.Replicas) == 0 {
+			continue
+		}
+
+		if latestObjs == nil {
+			latestObjs = obj
+			continue
+		}
+
+		if obj.Replicas[0].ModifyTime.After(latestObjs.Replicas[0].ModifyTime) {
+			latestObjs = obj
+		}
+	}
+
+	if len(statusFilePath) == 0 {
+		logger.Debugf("no status file found in %q", sourcePath)
+		return nil
+	}
+
+	buffer := bytes.Buffer{}
+
+	_, err = submitls.filesystem.DownloadFileToBuffer(statusFilePath, "", &buffer, false, nil)
+	if err != nil {
+		return errors.Wrapf(err, "failed to download file %q", statusFilePath)
+	}
+
+	status := mdrepo.SubmitStatusFile{}
+	err = json.Unmarshal(buffer.Bytes(), &status)
+	if err != nil {
+		return errors.Wrapf(err, "failed to decode json")
+	}
+
+	outputFormatterTable := outputFormatter.NewTable("Submission Status")
+
+	outputFormatterTable.SetHeader([]string{
+		"Total Files",
+		"Total Size",
+		"Token",
+		"Status",
+		"Time",
+	})
+
+	outputFormatterTable.AppendRow([]interface{}{
+		fmt.Sprintf("%d", status.TotalFileNumber),
+		types.SizeString(status.TotalFileSize),
+		status.Token,
+		status.Status,
+		status.Time,
+	})
+
+	return nil
+}
+
+func (submitls *SubmitListCommand) listCollection(outputFormatter *format.OutputFormatter, sourcePath string) error {
+	connection, err := submitls.filesystem.GetMetadataConnection(true)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get connection")
+	}
+	defer submitls.filesystem.ReturnMetadataConnection(connection)
+
+	outputFormatterTable := outputFormatter.NewTable("Content of " + sourcePath)
+
 	// collection
+	if submitls.outputFormatFlagValues.Format == format.OutputFormatLegacy {
+		outputFormatterTable.SetHeader([]string{
+			"Path",
+		})
+
+		outputFormatterTable.AppendRow([]interface{}{
+			path.GetIRODSRelativePath(submitls.dataRootPath, sourcePath) + ":",
+		})
+	} else {
+		outputFormatterTable.SetHeader([]string{
+			"Type",
+			"Path",
+		})
+		// outputFormatterTable.SetColumnWidthMax([]int{0, 50})
+
+		outputFormatterTable.AppendRow([]interface{}{
+			"collection",
+			path.GetIRODSRelativePath(submitls.dataRootPath, sourcePath),
+		})
+	}
+
+	// sub-collections and data-objects
 	colls, err := irodsclient_irodsfs.ListSubCollections(connection, sourcePath)
 	if err != nil {
 		return errors.Wrapf(err, "failed to list sub-collections in %q", sourcePath)
@@ -179,145 +323,114 @@ func (submitls *SubmitListCommand) listOne(sourceRootPath string, sourcePath str
 		return errors.Wrapf(err, "failed to list data-objects in %q", sourcePath)
 	}
 
-	// print text
-	commons.Printf("[%s]\n", submitls.getDataPath(sourceRootPath, sourcePath))
-	submitls.printTextGridHead()
-	submitls.printDataObjects(objs)
-	submitls.printCollections(colls)
+	submitls.printDataObjectsAndCollections(outputFormatter, sourcePath, objs, colls, false)
 
 	// call recursively
 	for _, coll := range colls {
-		fmt.Printf("\n")
-		err = submitls.listOne(sourceRootPath, coll.Path)
+		terminal.Printf("\n")
+		err = submitls.listCollection(outputFormatter, coll.Path)
 		if err != nil {
 			return errors.Wrapf(err, "failed to list %q", coll.Path)
 		}
 	}
 
-	if sourceRootPath == sourcePath {
-		for _, obj := range objs {
-			if commons.IsStatusFile(obj.Name) {
-				commons.Printf("\n")
-				err = submitls.catStatusFile(obj.Path)
-				if err != nil {
-					return errors.Wrapf(err, "failed to cat status file %q", obj.Path)
-				}
-				break
-			}
-		}
-	}
-
 	return nil
 }
 
-func (submitls *SubmitListCommand) catStatusFile(sourcePath string) error {
-	buffer := bytes.Buffer{}
-
-	_, err := submitls.filesystem.DownloadFileToBuffer(sourcePath, "", &buffer, true, nil)
-	if err != nil {
-		return errors.Wrapf(err, "failed to download file %q", sourcePath)
+func (submitls *SubmitListCommand) printDataObjectsAndCollections(outputFormatter *format.OutputFormatter, parentPath string, objectEntries []*irodsclient_types.IRODSDataObject, collectionEntries []*irodsclient_types.IRODSCollection, showFullPath bool) {
+	title := "Submission Data"
+	if parentPath != "" {
+		title = fmt.Sprintf("Content of %s", parentPath)
 	}
 
-	fmt.Printf("[SUBMISSION STATUS INFO]\n")
+	outputFormatterTable := outputFormatter.NewTable(title)
 
-	jsonStr := submitls.getPrettyStatusFileJSON(buffer.Bytes())
-	fmt.Printf("%s\n\n", string(jsonStr))
-	return nil
-}
-
-func (submitls *SubmitListCommand) getPrettyStatusFileJSON(jsonBytes []byte) string {
-	logger := log.WithFields(log.Fields{})
-
-	prettyJson := string(jsonBytes)
-
-	status := commons.SubmitStatusFile{}
-	err := json.Unmarshal(jsonBytes, &status)
-	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to decode json"))
-		return prettyJson
+	pathTitle := "Name"
+	if showFullPath {
+		pathTitle = "Path"
 	}
 
-	jsonStr, err := json.MarshalIndent(status, "", "    ")
-	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to marshal to json"))
-		return prettyJson
+	if submitls.outputFormatFlagValues.Format == format.OutputFormatLegacy {
+		outputFormatterTable.SetHeader([]string{
+			pathTitle,
+		})
+	} else {
+		outputFormatterTable.SetHeader([]string{
+			"Type",
+			pathTitle,
+			"Size",
+			"Modify Time",
+		})
+		// outputFormatterTable.SetColumnWidthMax([]int{0, 50, 20})
 	}
 
-	prettyJson = string(jsonStr)
-	return prettyJson
-}
+	sort.SliceStable(objectEntries, submitls.getDataObjectSortFunction(objectEntries))
+	sort.SliceStable(collectionEntries, submitls.getCollectionSortFunction(collectionEntries))
 
-func (submitls *SubmitListCommand) getDataPath(sourceRootPath string, sourcePath string) string {
-	rel, err := filepath.Rel(sourceRootPath, sourcePath)
-	if err != nil {
-		return sourcePath
-	}
-
-	if rel == "." {
-		return "/"
-	}
-
-	if strings.HasPrefix(rel, "./") {
-		return rel[1:]
-	}
-
-	if rel[0] != '/' {
-		return fmt.Sprintf("/%s", rel)
-	}
-
-	return rel
-}
-
-func (submitls *SubmitListCommand) printCollections(entries []*irodsclient_types.IRODSCollection) {
-	sort.SliceStable(entries, submitls.getCollectionSortFunction(entries))
-	for _, entry := range entries {
-		submitls.printTextGridRow(true, entry.Name, "-", "", entry.ModifyTime)
-	}
-}
-
-func (submitls *SubmitListCommand) printDataObjects(entries []*irodsclient_types.IRODSDataObject) {
-	sort.SliceStable(entries, submitls.getDataObjectSortFunction(entries))
-	for _, entry := range entries {
-		submitls.printDataObject(entry)
-	}
-}
-
-func (submitls *SubmitListCommand) printDataObject(entry *irodsclient_types.IRODSDataObject) {
-	if len(entry.Replicas) > 0 {
-		replica := entry.Replicas[0]
-
-		checksum := ""
-		if replica.Checksum != nil {
-			checksum = replica.Checksum.IRODSChecksumString
+	for _, entry := range objectEntries {
+		newName := entry.Name
+		if showFullPath {
+			newName = entry.Path
 		}
 
-		submitls.printTextGridRow(false, entry.Name, fmt.Sprintf("%d", entry.Size), checksum, replica.ModifyTime)
+		size := fmt.Sprintf("%v", entry.Size)
+		modifyTime := ""
+		if len(entry.Replicas) > 0 {
+			modifyTime = types.MakeDateTimeStringHM(entry.Replicas[0].ModifyTime)
+		}
+
+		if submitls.outputFormatFlagValues.Format == format.OutputFormatLegacy {
+			outputFormatterTable.AppendRow([]interface{}{
+				"  " + newName,
+			})
+		} else {
+			outputFormatterTable.AppendRow([]interface{}{
+				"data-object",
+				newName,
+				size,
+				modifyTime,
+			})
+		}
 	}
-}
 
-func (submitls *SubmitListCommand) printTextGridHead() {
-	submitls.printTextGridRowInternal("TYPE", "NAME", "SIZE", "CHECKSUM", "LAST_MODIFIED")
-}
+	for _, entry := range collectionEntries {
+		newName := entry.Name
+		if showFullPath {
+			newName = entry.Path
+		}
 
-func (submitls *SubmitListCommand) printTextGridRow(isDir bool, name string, size string, checksum string, lastmodified time.Time) {
-	typeStr := "File"
-	if isDir {
-		typeStr = "Dir"
+		modifyTime := types.MakeDateTimeStringHM(entry.ModifyTime)
+
+		if submitls.outputFormatFlagValues.Format == format.OutputFormatLegacy {
+			outputFormatterTable.AppendRow([]interface{}{
+				"  C- " + entry.Path,
+			})
+		} else {
+			outputFormatterTable.AppendRow([]interface{}{
+				"collection",
+				newName,
+				"",
+				modifyTime,
+			})
+		}
 	}
-
-	modTime := commons.MakeDateTimeStringHM(lastmodified)
-	submitls.printTextGridRowInternal(typeStr, name, size, checksum, modTime)
-}
-
-func (submitls *SubmitListCommand) printTextGridRowInternal(typeStr string, name string, size string, checksum string, lastmodified string) {
-
-	commons.Printf("%s\t%-50s\t%-12s\t%-32s\t%s\n", typeStr, name, size, checksum, lastmodified)
 }
 
 func (submitls *SubmitListCommand) getDataObjectSortFunction(entries []*irodsclient_types.IRODSDataObject) func(i int, j int) bool {
 	return func(i int, j int) bool {
 		return entries[i].Name < entries[j].Name
 	}
+}
+
+func (submitls *SubmitListCommand) getDataObjectModifyTime(object *irodsclient_types.IRODSDataObject) time.Time {
+	// ModifyTime of data object is considered to be ModifyTime of replica modified most recently
+	maxTime := object.Replicas[0].ModifyTime
+	for _, t := range object.Replicas[1:] {
+		if t.ModifyTime.After(maxTime) {
+			maxTime = t.ModifyTime
+		}
+	}
+	return maxTime
 }
 
 func (submitls *SubmitListCommand) getCollectionSortFunction(entries []*irodsclient_types.IRODSCollection) func(i int, j int) bool {

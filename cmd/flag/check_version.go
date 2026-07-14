@@ -5,8 +5,7 @@ import (
 )
 
 type CheckVersionFlagValues struct {
-	Silent bool
-	Check  bool
+	Check bool
 }
 
 var (
@@ -14,7 +13,6 @@ var (
 )
 
 func SetCheckVersionFlags(command *cobra.Command) {
-	command.Flags().BoolVar(&checkVersionFlagValues.Silent, "silent", false, "Do not show any messages if there is no new version available")
 	command.Flags().BoolVar(&checkVersionFlagValues.Check, "check", false, "Only check for the latest version without performing any updates")
 }
 

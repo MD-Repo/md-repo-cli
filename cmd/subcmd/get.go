@@ -178,8 +178,19 @@ func (get *GetCommand) Process() error {
 		return err
 	}
 
+	// group tickets by IRODSTicket to share filesystem and parallel job manager
+	ticketGroups := make(map[string][]mdrepo.MDRepoTicket)
+	ticketGroupOrder := []string{}
 	for _, mdRepoTicket := range mdRepoTickets {
-		err = get.processTicket(&mdRepoTicket)
+		if _, exists := ticketGroups[mdRepoTicket.IRODSTicket]; !exists {
+			ticketGroupOrder = append(ticketGroupOrder, mdRepoTicket.IRODSTicket)
+		}
+		ticketGroups[mdRepoTicket.IRODSTicket] = append(ticketGroups[mdRepoTicket.IRODSTicket], mdRepoTicket)
+	}
+
+	for _, irodsTicket := range ticketGroupOrder {
+		group := ticketGroups[irodsTicket]
+		err = get.processTicketGroup(group)
 		if err != nil {
 			return err
 		}
@@ -197,10 +208,13 @@ func (get *GetCommand) Process() error {
 	return nil
 }
 
-func (get *GetCommand) processTicket(mdRepoTicket *mdrepo.MDRepoTicket) error {
-	// we create filesystem, job manager for every ticket as they require separate auth
-	// Create a file system
-	account, err := mdRepoTicket.GetAccount()
+func (get *GetCommand) processTicketGroup(mdRepoTickets []mdrepo.MDRepoTicket) error {
+	if len(mdRepoTickets) == 0 {
+		return nil
+	}
+
+	// all tickets in the group share the same IRODSTicket, so they use the same account
+	account, err := mdRepoTickets[0].GetAccount()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get iRODS Account")
 	}
@@ -225,31 +239,35 @@ func (get *GetCommand) processTicket(mdRepoTicket *mdrepo.MDRepoTicket) error {
 		get.webdavClient = webdavClient
 	}
 
-	// parallel job manager
+	// parallel job manager - created once for the entire ticket group
 	ioSession := get.filesystem.GetIOSession()
 	get.parallelTransferJobManager = parallel.NewParallelJobManager(ioSession.GetMaxConnections(), !get.progressFlagValues.NoProgress, get.progressFlagValues.ShowFullPath, get.parallelTransferFlagValues.StopOnError)
 
-	// run
+	// schedule all paths in this ticket group
 	terminal.Printf("scheduling transfer...\n")
 
-	// we create a subdir for ticket
-	dataRelPath, err := mdrepo.GetMDRepoSimulationRelPath(mdRepoTicket.IRODSDataPath)
-	if err != nil {
-		return errors.Wrapf(err, "failed to extract data path from %q", mdRepoTicket.IRODSDataPath)
+	for i := range mdRepoTickets {
+		mdRepoTicket := &mdRepoTickets[i]
+
+		dataRelPath, err := mdrepo.GetMDRepoSimulationRelPath(mdRepoTicket.IRODSDataPath)
+		if err != nil {
+			return errors.Wrapf(err, "failed to extract data path from %q", mdRepoTicket.IRODSDataPath)
+		}
+
+		dataTargetPath := filepath.Join(get.targetPath, filepath.FromSlash(dataRelPath))
+		targetParentDir := filepath.Dir(dataTargetPath)
+		err = os.MkdirAll(targetParentDir, 0766)
+		if err != nil {
+			return errors.Wrapf(err, "failed to make a directory %q", targetParentDir)
+		}
+
+		err = get.getOne(mdRepoTicket, dataTargetPath)
+		if err != nil {
+			return errors.Wrapf(err, "failed to get %q to %q", mdRepoTicket.IRODSDataPath, dataTargetPath)
+		}
 	}
 
-	dataTargetPath := filepath.Join(get.targetPath, filepath.FromSlash(dataRelPath))
-	targetParentDir := filepath.Dir(dataTargetPath)
-	err = os.MkdirAll(targetParentDir, 0766)
-	if err != nil {
-		return errors.Wrapf(err, "failed to make a directory %q", targetParentDir)
-	}
-
-	err = get.getOne(mdRepoTicket, dataTargetPath)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get %q to %q", mdRepoTicket.IRODSDataPath, dataTargetPath)
-	}
-
+	// start all scheduled transfers at once
 	terminal.Printf("start transfer...\n")
 
 	transferErr := get.parallelTransferJobManager.Start()

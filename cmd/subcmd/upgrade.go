@@ -104,8 +104,8 @@ func (up *UpgradeCommand) upgrade(checkOnly bool, quiet bool) error {
 		}
 	} else {
 		if !quiet {
-			logger.Infof("Current client version installed is up-to-date: v%s", myVersion)
-			terminal.Printf("Current client version installed is up-to-date: v%s\n", myVersion)
+			logger.Infof("Current client version installed is up-to-date: %s", myVersion)
+			terminal.Printf("Current client version installed is up-to-date: %s\n", myVersion)
 		}
 		return nil
 	}

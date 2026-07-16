@@ -347,7 +347,7 @@ func (submit *SubmitCommand) processTicket(sourcePath string, mdRepoTicket *mdre
 	// set completed
 	submit.submitStatusFileWriter.SetCompleted()
 
-	terminal.Printf("done transfer...\n")
+	terminal.Printf("transfer finished...\n")
 
 	return nil
 }

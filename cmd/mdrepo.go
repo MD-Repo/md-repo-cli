@@ -89,7 +89,7 @@ func main() {
 	go func() {
 		defer wg.Done()
 		release, err := upgrade.CheckNewRelease()
-		if err != nil {
+		if err == nil {
 			if commons.HasNewRelease(commons.GetClientVersion(), release.Version()) {
 				// found a new release
 				notifyIfNewRelease = func() {

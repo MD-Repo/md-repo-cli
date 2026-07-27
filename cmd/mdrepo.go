@@ -89,14 +89,15 @@ func main() {
 	go func() {
 		defer wg.Done()
 		release, err := upgrade.CheckNewRelease()
-		if err == nil {
-			if commons.HasNewRelease(commons.GetClientVersion(), release.Version()) {
-				// found a new release
-				notifyIfNewRelease = func() {
-					terminal.Printf("A newer version v%s is available. Run 'mdrepo upgrade' to update.\n", release.Version())
-				}
-			}
+		if err != nil {
 			return
+		}
+
+		if commons.HasNewRelease(commons.GetClientVersion(), release.Version()) {
+			// found a new release
+			notifyIfNewRelease = func() {
+				terminal.Printf("A newer version v%s is available. Run 'mdrepo upgrade' to update.\n", release.Version())
+			}
 		}
 	}()
 

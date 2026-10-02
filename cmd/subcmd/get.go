@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/avast/retry-go"
@@ -86,18 +87,22 @@ type GetCommand struct {
 	transferReportManager *transfer.TransferReportManager
 	config                *config.Config
 
-	totalDownloadedFiles int
+	totalDownloadedFiles int64
 	totalDownloadedBytes int64
 	startTime            time.Time
 }
 
 func NewGetCommand(command *cobra.Command, args []string) (*GetCommand, error) {
+	parallelTransferFlagValues, err := flag.GetParallelTransferFlagValues()
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid parallel transfer flag")
+	}
 	get := &GetCommand{
 		command: command,
 
 		commonFlagValues:           flag.GetCommonFlagValues(command),
 		tokenFlagValues:            flag.GetTokenFlagValues(),
-		parallelTransferFlagValues: flag.GetParallelTransferFlagValues(),
+		parallelTransferFlagValues: parallelTransferFlagValues,
 		forceFlagValues:            flag.GetForceFlagValues(),
 		progressFlagValues:         flag.GetProgressFlagValues(),
 		retryFlagValues:            flag.GetRetryFlagValues(),
@@ -126,7 +131,7 @@ func (get *GetCommand) Process() error {
 
 	cont, err := flag.ProcessCommonFlags(get.command)
 	if err != nil {
-		return errors.Wrapf(err, "failed to process common flags")
+		return errors.Wrap(err, "failed to process common flags")
 	}
 
 	if !cont {
@@ -145,7 +150,7 @@ func (get *GetCommand) Process() error {
 	// handle local flags
 	_, err = config.InputMissingFields()
 	if err != nil {
-		return errors.Wrapf(err, "failed to input missing fields")
+		return errors.Wrap(err, "failed to input missing fields")
 	}
 
 	if len(get.config.Token) > 0 && len(get.config.TicketString) == 0 {
@@ -168,14 +173,14 @@ func (get *GetCommand) Process() error {
 	// transfer report
 	get.transferReportManager, err = transfer.NewTransferReportManager(get.transferReportFlagValues.Report, get.transferReportFlagValues.ReportPath, get.transferReportFlagValues.ReportToStdout)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create transfer report manager")
+		return errors.Wrap(err, "failed to create transfer report manager")
 	}
 	defer get.transferReportManager.Release()
 
 	// run
 	err = get.ensureTargetIsDir(get.targetPath)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "target path %q is not a directory", get.targetPath)
 	}
 
 	// group tickets by IRODSTicket to share filesystem and parallel job manager
@@ -221,7 +226,7 @@ func (get *GetCommand) processTicketGroup(mdRepoTickets []mdrepo.MDRepoTicket) e
 
 	get.account = account
 
-	get.filesystem, err = irods.GetIRODSFSClientForLargeFileIO(get.account, get.maxConnectionNum, get.parallelTransferFlagValues.TCPBufferSize, true, get.commonFlagValues.Timeout)
+	get.filesystem, err = irods.GetIRODSFSClientForLargeFileIO(get.account, get.maxConnectionNum, get.parallelTransferFlagValues.TCPSendBufferSize, get.parallelTransferFlagValues.TCPRecvBufferSize, true, get.commonFlagValues.Timeout)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get iRODS FS Client")
 	}
@@ -424,6 +429,9 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntr
 			case transfer.TransferModeWebDAV:
 				downloadResult, downloadErr = get.webdavClient.DownloadFile(sourceEntry, downloadPath, "", true, progressCallbackGet)
 				notes = append(notes, "webdav")
+			case transfer.TransferModeRedirectToResource:
+				downloadResult, downloadErr = get.filesystem.DownloadFileRedirectToResource(sourceEntry.Path, "", downloadPath, threadsRequired, true, progressCallbackGet)
+				notes = append(notes, "redirect", fmt.Sprintf("%d threads", threadsRequired))
 			case transfer.TransferModeICAT:
 				fallthrough
 			default:
@@ -441,10 +449,9 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntr
 			return errors.Wrapf(retryErr, "failed to download %q to %q after %d attempts", sourceEntry.Path, targetPath, retryNum+1)
 		}
 
-		get.totalDownloadedFiles++
-		get.totalDownloadedBytes += sourceEntry.Size
+		get.addDownloaded(sourceEntry.Size)
 
-		reportTransfer(downloadResult, downloadErr, notes...)
+		reportTransfer(downloadResult, nil, notes...)
 
 		logger.Debugf("downloaded a data object %q to %q", sourceEntry.Path, targetPath)
 
@@ -453,6 +460,15 @@ func (get *GetCommand) scheduleGet(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntr
 
 	get.parallelTransferJobManager.Schedule(sourceEntry.Path, getTask, threadsRequired, progress.UnitsBytes)
 	logger.Debugf("scheduled a data object download %q to %q, %d threads", sourceEntry.Path, targetPath, threadsRequired)
+}
+
+func (get *GetCommand) addDownloaded(bytes int64) {
+	atomic.AddInt64(&get.totalDownloadedFiles, 1)
+	atomic.AddInt64(&get.totalDownloadedBytes, bytes)
+}
+
+func (get *GetCommand) downloadedTotals() (int64, int64) {
+	return atomic.LoadInt64(&get.totalDownloadedFiles), atomic.LoadInt64(&get.totalDownloadedBytes)
 }
 
 func (get *GetCommand) getFile(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string) error {
@@ -701,6 +717,9 @@ func (get *GetCommand) determineTransferMethod(size int64) (transfer.TransferMod
 
 		logger.Info("using WebDAV for downloading a data object")
 		return transfer.TransferModeWebDAV, 1
+	} else if get.parallelTransferFlagValues.RedirectToResource {
+		logger.Info("using resource server redirection for downloading a data object")
+		return transfer.TransferModeRedirectToResource, threads
 	}
 
 	if get.webdavClient == nil {

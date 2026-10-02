@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"crypto/tls"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/MD-Repo/md-repo-cli/commons/terminal"
 	"github.com/MD-Repo/md-repo-cli/commons/types"
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_common "github.com/cyverse/go-irodsclient/irods/common"
@@ -51,9 +54,25 @@ func NewWebDAVClient(filesystem *irodsclient_fs.FileSystem, baseURL string, user
 func (client *WebDAVClient) initWebDAV() error {
 	webdav := gowebdav.NewClient(client.baseURL, client.username, client.password)
 
+	webdav.SetTransport(newWebDAVTransport())
+	err := webdav.Connect()
+	if err != nil {
+		if httpStatusErr, ok := client.getWebDAVErrorCode(err); ok {
+			return types.NewWebDAVError(client.baseURL, int(httpStatusErr))
+		}
+
+		return types.NewWebDAVError(client.baseURL, http.StatusServiceUnavailable)
+	}
+
+	client.webdav = webdav
+	return nil
+}
+
+func newWebDAVTransport() *http.Transport {
 	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS10,
 		CipherSuites: []uint16{
-			// TLS 1.0 - 1.2 cipher suites.
+			// TLS 1.0 - 1.2 cipher suites, retained for iRODS WebDAV compatibility.
 			tls.TLS_RSA_WITH_RC4_128_SHA,
 			tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
 			tls.TLS_RSA_WITH_AES_128_CBC_SHA,
@@ -76,29 +95,28 @@ func (client *WebDAVClient) initWebDAV() error {
 			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
 			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
-			// TLS 1.3 cipher suites.
+			// TLS 1.3 cipher suites are not configurable in Go, but are kept for
+			// compatibility with the previous configuration.
 			tls.TLS_AES_128_GCM_SHA256,
 			tls.TLS_AES_256_GCM_SHA384,
 			tls.TLS_CHACHA20_POLY1305_SHA256,
 		},
 	}
 
-	transport := &http.Transport{
-		TLSClientConfig: tlsConfig,
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		TLSClientConfig:       tlsConfig,
 	}
-
-	webdav.SetTransport(transport)
-	err := webdav.Connect()
-	if err != nil {
-		if httpStatusErr, ok := client.getWebDAVErrorCode(err); ok {
-			return types.NewWebDAVError(client.baseURL, int(httpStatusErr))
-		}
-
-		return types.NewWebDAVError(client.baseURL, http.StatusServiceUnavailable)
-	}
-
-	client.webdav = webdav
-	return nil
 }
 
 func (client *WebDAVClient) getWebDAVErrorCode(err error) (int, bool) {
@@ -121,7 +139,15 @@ func (client *WebDAVClient) getWebDavError(url string, err error) error {
 }
 
 func (client *WebDAVClient) getPathForTicket(irodsPath string, ticket string) string {
-	return client.baseURL + irodsPath + "?ticket=" + ticket
+	webdavURL, err := url.Parse(client.baseURL)
+	if err != nil {
+		return client.baseURL + irodsPath + "?ticket=" + url.QueryEscape(ticket)
+	}
+	webdavURL.Path = strings.TrimRight(webdavURL.Path, "/") + "/" + strings.TrimLeft(irodsPath, "/")
+	query := webdavURL.Query()
+	query.Set("ticket", ticket)
+	webdavURL.RawQuery = query.Encode()
+	return webdavURL.String()
 }
 
 func (client *WebDAVClient) DownloadFile(sourceEntry *irodsclient_fs.Entry, localPath string, ticket string, verifyChecksum bool, callback irodsclient_common.TransferTrackerCallback) (*irodsclient_fs.FileTransferResult, error) {
@@ -131,8 +157,8 @@ func (client *WebDAVClient) DownloadFile(sourceEntry *irodsclient_fs.Entry, loca
 		"ticket":            ticket,
 	})
 
-	irodsSrcPath := irodsclient_util.GetCorrectIRODSPath(sourceEntry.Path)
-	localDestPath := irodsclient_util.GetCorrectLocalPath(localPath)
+	irodsSrcPath := irodsclient_util.CleanIRODSPath(sourceEntry.Path)
+	localDestPath := irodsclient_util.CleanLocalPath(localPath)
 
 	localFilePath := localDestPath
 
@@ -168,11 +194,13 @@ func (client *WebDAVClient) DownloadFile(sourceEntry *irodsclient_fs.Entry, loca
 
 	if sourceEntry.Size == 0 {
 		// zero size file, just create an empty file
-		f, err := os.OpenFile(localPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+		f, err := os.OpenFile(localFilePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 		if err != nil {
-			return fileTransferResult, errors.Wrapf(err, "failed to create a local file %q", localPath)
+			return fileTransferResult, errors.Wrapf(err, "failed to create a local file %q", localFilePath)
 		}
-		f.Close()
+		if err := f.Close(); err != nil {
+			return fileTransferResult, errors.Wrapf(err, "failed to close a local file %q", localFilePath)
+		}
 
 		fileTransferResult.LocalCheckSumAlgorithm = sourceEntry.CheckSumAlgorithm
 		fileTransferResult.LocalCheckSum = sourceEntry.CheckSum
@@ -183,12 +211,17 @@ func (client *WebDAVClient) DownloadFile(sourceEntry *irodsclient_fs.Entry, loca
 		return fileTransferResult, nil
 	}
 
-	// resume from partial download if the file already exists
 	offset := int64(0)
+	resumed := false
 	if partialStat, statErr := os.Stat(localFilePath); statErr == nil {
 		if partialStat.Size() > 0 && partialStat.Size() < sourceEntry.Size {
-			offset = partialStat.Size()
-			logger.Debugf("resuming download of %q from offset %d", irodsSrcPath, offset)
+			if len(sourceEntry.CheckSum) > 0 {
+				offset = partialStat.Size()
+				resumed = true
+				logger.Debugf("resuming download of %q from offset %d", irodsSrcPath, offset)
+			} else {
+				logger.Warnf("checksum for %q is not available; restarting instead of using an unverifiable local partial file", irodsSrcPath)
+			}
 		}
 	}
 
@@ -206,19 +239,37 @@ func (client *WebDAVClient) DownloadFile(sourceEntry *irodsclient_fs.Entry, loca
 
 	fileTransferResult.LocalSize = offset
 
-	if verifyChecksum {
-		localHash, err := client.calculateLocalFileHash(localPath, sourceEntry.CheckSumAlgorithm, callback)
+	if verifyChecksum || resumed {
+		localHash, err := client.calculateLocalFileHash(localFilePath, sourceEntry.CheckSumAlgorithm, callback)
 		if err != nil {
-			return fileTransferResult, errors.Wrapf(err, "failed to calculate hash of local file %q with alg %s", localPath, sourceEntry.CheckSumAlgorithm)
+			return fileTransferResult, errors.Wrapf(err, "failed to calculate hash of local file %q with alg %s", localFilePath, sourceEntry.CheckSumAlgorithm)
 		}
 
 		fileTransferResult.LocalCheckSumAlgorithm = sourceEntry.CheckSumAlgorithm
 		fileTransferResult.LocalCheckSum = localHash
 
 		if !bytes.Equal(sourceEntry.CheckSum, localHash) {
-			// remove the corrupted file so the next retry starts from offset 0
+			if resumed {
+				logger.Warnf("checksum verification failed after resuming %q; downloading the file again from the beginning", irodsSrcPath)
+				newOffset, downloadErr = client.downloadToLocalWithTrackerCallBack(irodsSrcPath, localFilePath, ticket, 0, sourceEntry.Size, sourceEntry.Size, callback)
+				if downloadErr != nil {
+					return fileTransferResult, errors.Wrapf(downloadErr, "failed to re-download file %q from the beginning after checksum verification failed", irodsSrcPath)
+				}
+				fileTransferResult.LocalSize = newOffset
+
+				localHash, err = client.calculateLocalFileHash(localFilePath, sourceEntry.CheckSumAlgorithm, callback)
+				if err != nil {
+					return fileTransferResult, errors.Wrapf(err, "failed to calculate hash of local file %q with alg %s", localFilePath, sourceEntry.CheckSumAlgorithm)
+				}
+				fileTransferResult.LocalCheckSum = localHash
+				if bytes.Equal(sourceEntry.CheckSum, localHash) {
+					fileTransferResult.EndTime = time.Now()
+					return fileTransferResult, nil
+				}
+			}
+
 			os.Remove(localFilePath)
-			return fileTransferResult, errors.Errorf("checksum verification failed for local file %q, download failed", localPath)
+			return fileTransferResult, errors.Errorf("checksum verification failed for local file %q, download failed", localFilePath)
 		}
 	}
 
@@ -234,8 +285,8 @@ func (client *WebDAVClient) UploadFile(localPath string, irodsPath string, ticke
 		"ticket":            ticket,
 	})
 
-	localSrcPath := irodsclient_util.GetCorrectLocalPath(localPath)
-	irodsDestPath := irodsclient_util.GetCorrectIRODSPath(irodsPath)
+	localSrcPath := irodsclient_util.CleanLocalPath(localPath)
+	irodsDestPath := irodsclient_util.CleanIRODSPath(irodsPath)
 
 	irodsFilePath := irodsDestPath
 
@@ -292,13 +343,9 @@ func (client *WebDAVClient) UploadFile(localPath string, irodsPath string, ticke
 	if overwrite {
 		// update - overwrite
 		client.filesystem.InvalidateCacheForFileUpdate(irodsFilePath)
-		cachePropagation := client.filesystem.GetCachePropagation()
-		cachePropagation.PropagateFileUpdate(irodsFilePath)
 	} else {
 		// create
 		client.filesystem.InvalidateCacheForFileCreate(irodsFilePath)
-		cachePropagation := client.filesystem.GetCachePropagation()
-		cachePropagation.PropagateFileCreate(irodsFilePath)
 	}
 
 	entry, err = client.filesystem.Stat(irodsFilePath)
@@ -311,7 +358,10 @@ func (client *WebDAVClient) UploadFile(localPath string, irodsPath string, ticke
 	fileTransferResult.IRODSSize = entry.Size
 
 	if verifyChecksum {
-		if len(entry.CheckSum) > 0 {
+		if len(entry.CheckSum) == 0 {
+			logger.Warnf("checksum for uploaded file %q is not available yet; skipping checksum verification", irodsFilePath)
+			terminal.PrintErrorf("Warning: checksum for uploaded file %q is not available yet; skipping checksum verification\n", irodsFilePath)
+		} else {
 			localHash, err := client.calculateLocalFileHash(localSrcPath, entry.CheckSumAlgorithm, callback)
 			if err != nil {
 				return fileTransferResult, errors.Wrapf(err, "failed to calculate hash of local file %q with alg %s", localSrcPath, entry.CheckSumAlgorithm)
@@ -320,8 +370,9 @@ func (client *WebDAVClient) UploadFile(localPath string, irodsPath string, ticke
 			fileTransferResult.LocalCheckSumAlgorithm = entry.CheckSumAlgorithm
 			fileTransferResult.LocalCheckSum = localHash
 
-			if !bytes.Equal(entry.CheckSum, localHash) {
-				return fileTransferResult, errors.Errorf("checksum verification failed for iRODS file %q, upload failed", irodsFilePath)
+			err = validateUploadedChecksum(client.filesystem, irodsFilePath, entry.CheckSum, localHash)
+			if err != nil {
+				return fileTransferResult, err
 			}
 		}
 	}
@@ -329,6 +380,24 @@ func (client *WebDAVClient) UploadFile(localPath string, irodsPath string, ticke
 	fileTransferResult.EndTime = time.Now()
 
 	return fileTransferResult, nil
+}
+
+type remoteFileRemover interface {
+	RemoveFile(irodsPath string, force bool) error
+}
+
+func validateUploadedChecksum(filesystem remoteFileRemover, irodsFilePath string, expected []byte, actual []byte) error {
+	if len(expected) == 0 {
+		return nil
+	}
+	if bytes.Equal(expected, actual) {
+		return nil
+	}
+
+	if err := filesystem.RemoveFile(irodsFilePath, true); err != nil {
+		return errors.Wrapf(err, "checksum verification failed for iRODS file %q and failed to remove the corrupted file", irodsFilePath)
+	}
+	return errors.Errorf("checksum verification failed for iRODS file %q, removed corrupted file", irodsFilePath)
 }
 
 func (client *WebDAVClient) calculateLocalFileHash(localPath string, algorithm irodsclient_types.ChecksumAlgorithm, processCallback irodsclient_common.TransferTrackerCallback) ([]byte, error) {

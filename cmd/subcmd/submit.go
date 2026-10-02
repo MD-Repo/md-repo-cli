@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/MD-Repo/md-repo-cli/cmd/flag"
@@ -90,7 +91,7 @@ type SubmitCommand struct {
 	config                     *config.Config
 	submitStatusFileWriter     *mdrepo.SubmitStatusFileWriter
 
-	totalUploadedFiles int
+	totalUploadedFiles int64
 	totalUploadedBytes int64
 	startTime          time.Time
 
@@ -98,13 +99,17 @@ type SubmitCommand struct {
 }
 
 func NewSubmitCommand(command *cobra.Command, args []string) (*SubmitCommand, error) {
+	parallelTransferFlagValues, err := flag.GetParallelTransferFlagValues()
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid parallel transfer flag")
+	}
 	submit := &SubmitCommand{
 		command: command,
 
 		commonFlagValues:           flag.GetCommonFlagValues(command),
 		submissionFlagValues:       flag.GetSubmissionFlagValues(),
 		tokenFlagValues:            flag.GetTokenFlagValues(),
-		parallelTransferFlagValues: flag.GetParallelTransferFlagValues(),
+		parallelTransferFlagValues: parallelTransferFlagValues,
 		forceFlagValues:            flag.GetForceFlagValues(),
 		progressFlagValues:         flag.GetProgressFlagValues(),
 		retryFlagValues:            flag.GetRetryFlagValues(),
@@ -132,8 +137,9 @@ func (submit *SubmitCommand) Process() error {
 
 	cont, err := flag.ProcessCommonFlags(submit.command)
 	if err != nil {
-		return errors.Wrapf(err, "Failed to process common flags")
+		return errors.Wrapf(err, "failed to process common flags")
 	}
+
 	if !cont {
 		return nil
 	}
@@ -150,14 +156,14 @@ func (submit *SubmitCommand) Process() error {
 	// handle local flags
 	_, err = config.InputMissingFields()
 	if err != nil {
-		return errors.Wrapf(err, "failed to input missing fields")
+		return errors.Wrap(err, "failed to input missing fields")
 	}
 
 	// validate source paths
 	terminal.Printf("validating metadata files...\n")
 	validSourcePaths, invalidSourcePaths, invalidSourcePathsErrors, orcID, err := submit.scanSourcePaths(submit.submissionFlagValues.OrcID)
 	if err != nil {
-		return errors.Wrapf(err, "Failed to scan source paths")
+		return errors.Wrap(err, "Failed to scan source paths")
 	}
 
 	// check if the number of simulations matches the expected number
@@ -267,8 +273,9 @@ func (submit *SubmitCommand) Process() error {
 	// print final summary
 	if !submit.progressFlagValues.NoProgress {
 		timeTaken := time.Since(submit.startTime).Seconds()
-		totalUploadedSize := types.SizeString(submit.totalUploadedBytes)
-		bps := float64(submit.totalUploadedBytes) / timeTaken
+		totalUploadedFiles, totalUploadedBytes := submit.uploadedTotals()
+		totalUploadedSize := types.SizeString(totalUploadedBytes)
+		bps := float64(totalUploadedFiles) / timeTaken
 		bpsString := fmt.Sprintf("%s/s", types.SizeString(int64(bps)))
 		terminal.Printf("Uploaded %d files, %s in total, time taken: %.2f seconds, average speed: %s\n", submit.totalUploadedFiles, totalUploadedSize, timeTaken, bpsString)
 	}
@@ -286,7 +293,7 @@ func (submit *SubmitCommand) processTicket(sourcePath string, mdRepoTicket *mdre
 
 	submit.account = account
 
-	submit.filesystem, err = irods.GetIRODSFSClientForLargeFileIO(submit.account, submit.maxConnectionNum, submit.parallelTransferFlagValues.TCPBufferSize, true, submit.commonFlagValues.Timeout)
+	submit.filesystem, err = irods.GetIRODSFSClientForLargeFileIO(submit.account, submit.maxConnectionNum, submit.parallelTransferFlagValues.TCPSendBufferSize, submit.parallelTransferFlagValues.TCPRecvBufferSize, true, submit.commonFlagValues.Timeout)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get iRODS FS Client")
 	}
@@ -798,6 +805,8 @@ func (submit *SubmitCommand) scheduleSubmit(mdRepoTicket *mdrepo.MDRepoTicket, s
 			case transfer.TransferModeWebDAV:
 				// this may not work with ticket
 				uploadResult, uploadErr = submit.webdavClient.UploadFile(uploadSourcePath, targetPath, "", true, progressCallbackPut)
+			case transfer.TransferModeRedirectToResource:
+				uploadResult, uploadErr = submit.filesystem.UploadFileRedirectToResource(uploadSourcePath, targetPath, "", threadsRequired, false, true, progressCallbackPut)
 			case transfer.TransferModeICAT:
 				fallthrough
 			default:
@@ -814,8 +823,7 @@ func (submit *SubmitCommand) scheduleSubmit(mdRepoTicket *mdrepo.MDRepoTicket, s
 			return errors.Wrapf(retryErr, "failed to upload %q to %q after %d attempts", sourcePath, targetPath, retryNum+1)
 		}
 
-		submit.totalUploadedFiles++
-		submit.totalUploadedBytes += sourceStat.Size()
+		submit.addUploaded(1, sourceStat.Size())
 
 		reportTransfer(uploadResult, nil, notes...)
 
@@ -829,6 +837,15 @@ func (submit *SubmitCommand) scheduleSubmit(mdRepoTicket *mdrepo.MDRepoTicket, s
 	return nil
 }
 
+func (submit *SubmitCommand) addUploaded(files int64, bytes int64) {
+	atomic.AddInt64(&submit.totalUploadedFiles, files)
+	atomic.AddInt64(&submit.totalUploadedBytes, bytes)
+}
+
+func (submit *SubmitCommand) uploadedTotals() (int64, int64) {
+	return atomic.LoadInt64(&submit.totalUploadedFiles), atomic.LoadInt64(&submit.totalUploadedBytes)
+}
+
 func (submit *SubmitCommand) determineTransferMethod(size int64) (transfer.TransferMode, int) {
 	logger := log.WithFields(log.Fields{})
 
@@ -839,7 +856,19 @@ func (submit *SubmitCommand) determineTransferMethod(size int64) (transfer.Trans
 		threads = 1
 	}
 
-	// we don't support webdav transfer here
+	if submit.parallelTransferFlagValues.Icat {
+		logger.Info("using ICAT transfer for uploading a data object")
+		return transfer.TransferModeICAT, threads
+	} else if submit.parallelTransferFlagValues.WebDAV {
+		// fallback to ICAT
+		// we don't support webdav upload
+		logger.Info("WebDAV is not configured. Using ICAT transfer for uploading a data object")
+		return transfer.TransferModeICAT, threads
+	} else if submit.parallelTransferFlagValues.RedirectToResource {
+		logger.Info("using resource server redirection for uploading a data object")
+		return transfer.TransferModeRedirectToResource, threads
+	}
+
 	logger.Info("using ICAT transfer for uploading a data object")
 	return transfer.TransferModeICAT, threads
 }

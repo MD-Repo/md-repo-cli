@@ -82,6 +82,7 @@ type ParallelJobManager struct {
 	showFullPath            bool
 	progressWriter          progress.Writer
 	progressTrackers        map[string]*progress.Tracker
+	progressTrackersByJob   map[string][]*progress.Tracker
 	progressTrackerCallback terminal.ProgressTrackerCallback
 	jobErrors               []error
 	stopOnError             bool
@@ -94,6 +95,10 @@ type ParallelJobManager struct {
 
 // NewParallelJobManager creates a new ParallelJobManager
 func NewParallelJobManager(weightCapacity int, showProgress bool, showFullPath bool, stopOnError bool) *ParallelJobManager {
+	if weightCapacity < 1 {
+		weightCapacity = 1
+	}
+
 	manager := &ParallelJobManager{
 		nextJobIndex:            0,
 		pendingJobs:             list.New(),
@@ -105,6 +110,7 @@ func NewParallelJobManager(weightCapacity int, showProgress bool, showFullPath b
 		showFullPath:            showFullPath,
 		progressWriter:          nil,
 		progressTrackers:        map[string]*progress.Tracker{},
+		progressTrackersByJob:   map[string][]*progress.Tracker{},
 		progressTrackerCallback: nil,
 		jobErrors:               nil,
 		stopOnError:             stopOnError,
@@ -229,6 +235,13 @@ func (manager *ParallelJobManager) Schedule(name string, task ParallelJobTask, w
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
 
+	if weight < 1 {
+		weight = 1
+	}
+	if weight > manager.weightCapacity {
+		weight = manager.weightCapacity
+	}
+
 	job := newParallelJob(manager, name, task, weight, progressUnit)
 
 	manager.pendingJobs.PushBack(job)
@@ -271,6 +284,7 @@ func (manager *ParallelJobManager) Start() error {
 			})
 
 			err := job.task(job)
+			manager.finishJobProgress(job, err)
 			if err != nil {
 				// increase jobs errored counter
 				atomic.AddInt64(&manager.jobsErroredCounter, 1)
@@ -339,6 +353,16 @@ func (manager *ParallelJobManager) startProgress() {
 			} else {
 				tracker = t
 			}
+			found := false
+			for _, jobTracker := range manager.progressTrackersByJob[taskName] {
+				if jobTracker == tracker {
+					found = true
+					break
+				}
+			}
+			if !found {
+				manager.progressTrackersByJob[taskName] = append(manager.progressTrackersByJob[taskName], tracker)
+			}
 
 			if processed >= 0 {
 				tracker.SetValue(processed)
@@ -346,8 +370,6 @@ func (manager *ParallelJobManager) startProgress() {
 
 			if errored {
 				tracker.MarkAsErrored()
-			} else if processed >= total {
-				tracker.MarkAsDone()
 			}
 		}
 	}
@@ -356,21 +378,25 @@ func (manager *ParallelJobManager) startProgress() {
 func (manager *ParallelJobManager) endProgress() {
 	if manager.showProgress {
 		if manager.progressWriter != nil {
-			manager.mutex.Lock()
-
-			for _, tracker := range manager.progressTrackers {
-				if len(manager.jobErrors) == 0 {
-					tracker.MarkAsDone()
-				} else {
-					if !tracker.IsDone() {
-						tracker.MarkAsErrored()
-					}
-				}
-			}
-
-			manager.mutex.Unlock()
-
 			manager.progressWriter.Stop()
+		}
+	}
+}
+
+func (manager *ParallelJobManager) finishJobProgress(job *ParallelJob, jobErr error) {
+	if !manager.showProgress {
+		return
+	}
+
+	canceled := job.IsCanceled()
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+
+	for _, tracker := range manager.progressTrackersByJob[job.name] {
+		if jobErr != nil {
+			tracker.MarkAsErrored()
+		} else if !canceled {
+			tracker.MarkAsDone()
 		}
 	}
 }

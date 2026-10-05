@@ -13,9 +13,10 @@ const (
 
 	FilesystemTimeout               irodsclient_types.Duration = irodsclient_types.Duration(10 * time.Minute)
 	LongFilesystemTimeout           irodsclient_types.Duration = irodsclient_types.Duration(15 * time.Minute) // exceptionally long timeout for listing dirs or users
-	TransferThreadNumDefault        int                        = 5
-	TransferThreadNumPerFileDefault int                        = 5
-	TcpBufferSizeStringDefault      string                     = "0"
+	transferThreadNumDefault        int                        = 5
+	transferThreadNumPerFileDefault int                        = 5
+	tcpSendBufferSizeStringDefault  string                     = "0"
+	tcpRecvBufferSizeStringDefault  string                     = "0"
 
 	// iRODS configuration
 	// Prod
@@ -43,21 +44,30 @@ func GetDefaultFilesystemTimeoutInSeconds() int {
 	return int(FilesystemTimeout / irodsclient_types.Duration(time.Second))
 }
 
-func GetDefaultTCPBufferSize() int {
-	size, _ := types.ParseSize(TcpBufferSizeStringDefault)
+func GetDefaultTCPSendBufferSize() int {
+	size, _ := types.ParseSize(GetDefaultTCPSendBufferSizeString())
 	return int(size)
 }
 
-func GetDefaultTCPBufferSizeString() string {
-	return TcpBufferSizeStringDefault
+func GetDefaultTCPSendBufferSizeString() string {
+	return tcpSendBufferSizeStringDefault
+}
+
+func GetDefaultTCPRecvBufferSize() int {
+	size, _ := types.ParseSize(GetDefaultTCPRecvBufferSizeString())
+	return int(size)
+}
+
+func GetDefaultTCPRecvBufferSizeString() string {
+	return tcpRecvBufferSizeStringDefault
 }
 
 func GetDefaultTransferThreadNum() int {
-	return TransferThreadNumDefault
+	return transferThreadNumDefault
 }
 
 func GetDefaultTransferThreadNumPerFile() int {
-	return TransferThreadNumPerFileDefault
+	return transferThreadNumPerFileDefault
 }
 
 func GetMaxSimulationSubmissionSize() int64 {

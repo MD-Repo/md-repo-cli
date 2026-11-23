@@ -124,7 +124,7 @@ func (up *UpgradeCommand) upgrade(checkOnly bool, quiet bool) error {
 	}
 
 	if !quiet {
-		terminal.Printf("Upgrade from v%s to v%s has done successfully!\n", myVersion, newRelease.Version())
+		terminal.Printf("Upgrade from %s to v%s completed successfully!\n", myVersion, newRelease.Version())
 	}
 	return nil
 }

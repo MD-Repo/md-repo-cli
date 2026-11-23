@@ -13,6 +13,7 @@ import (
 	"github.com/cockroachdb/errors"
 	irodsclient_fs "github.com/cyverse/go-irodsclient/fs"
 	irodsclient_irodsfs "github.com/cyverse/go-irodsclient/irods/fs"
+	irodsclient_session "github.com/cyverse/go-irodsclient/irods/session"
 	irodsclient_types "github.com/cyverse/go-irodsclient/irods/types"
 	irodsclient_util "github.com/cyverse/go-irodsclient/irods/util"
 	"github.com/jedib0t/go-pretty/v6/progress"
@@ -193,7 +194,29 @@ func (get *GetCommand) Process() error {
 		ticketGroups[mdRepoTicket.IRODSTicket] = append(ticketGroups[mdRepoTicket.IRODSTicket], mdRepoTicket)
 	}
 
-	for _, irodsTicket := range ticketGroupOrder {
+	if len(ticketGroupOrder) > 0 {
+		// One iRODS client for the whole run. Every simulation has its own
+		// ticket, and logging in again for each one cost ~5 s per simulation
+		// (MDR-117), so the ticket is switched on the open connections
+		// instead.
+		err = get.openFilesystem(ticketGroups[ticketGroupOrder[0]][0])
+		if err != nil {
+			return err
+		}
+		defer func() {
+			get.filesystem.Release()
+			get.filesystem = nil
+		}()
+	}
+
+	for i, irodsTicket := range ticketGroupOrder {
+		if i > 0 {
+			err = get.switchTicket(irodsTicket)
+			if err != nil {
+				return err
+			}
+		}
+
 		group := ticketGroups[irodsTicket]
 		err = get.processTicketGroup(group)
 		if err != nil {
@@ -213,13 +236,10 @@ func (get *GetCommand) Process() error {
 	return nil
 }
 
-func (get *GetCommand) processTicketGroup(mdRepoTickets []mdrepo.MDRepoTicket) error {
-	if len(mdRepoTickets) == 0 {
-		return nil
-	}
-
-	// all tickets in the group share the same IRODSTicket, so they use the same account
-	account, err := mdRepoTickets[0].GetAccount()
+// openFilesystem creates the iRODS client used for the whole run, logged in
+// with the first ticket.
+func (get *GetCommand) openFilesystem(firstTicket mdrepo.MDRepoTicket) error {
+	account, err := firstTicket.GetAccount()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get iRODS Account")
 	}
@@ -230,18 +250,75 @@ func (get *GetCommand) processTicketGroup(mdRepoTickets []mdrepo.MDRepoTicket) e
 	if err != nil {
 		return errors.Wrapf(err, "failed to get iRODS FS Client")
 	}
-	defer func() {
-		get.filesystem.Release()
-		get.filesystem = nil
-	}()
 
 	if get.parallelTransferFlagValues.WebDAV {
 		webdavClient, err := webdav.NewWebDAVClient(get.filesystem, config.MDRepoWebDAVServerURL+config.MDRepoWebDAVPrefix, get.account.ProxyUser, get.account.Password)
 		if err != nil {
+			get.filesystem.Release()
+			get.filesystem = nil
 			return errors.Wrap(err, "failed to create WebDAV client")
 		}
 
 		get.webdavClient = webdavClient
+	}
+
+	return nil
+}
+
+// switchTicket makes the open iRODS client use another ticket. Connections
+// opened from now on log in with it (the sessions share get.account), and the
+// connections already open are given it with a "session" ticket request,
+// which replaces the connection's previous ticket. Called between ticket
+// groups, when no transfer is running.
+func (get *GetCommand) switchTicket(irodsTicket string) error {
+	logger := log.WithFields(log.Fields{
+		"ticket": irodsTicket,
+	})
+
+	get.account.Ticket = irodsTicket
+
+	sessions := []*irodsclient_session.IRODSSession{
+		get.filesystem.GetMetadataSession(),
+		get.filesystem.GetIOSession(),
+	}
+
+	for _, sess := range sessions {
+		idle := sess.GetIdleConnections()
+		if idle == 0 {
+			continue
+		}
+
+		conns, err := sess.AcquireConnectionsMulti(idle, false)
+		for _, conn := range conns {
+			if !conn.IsConnected() {
+				// connected after the account change, so it already has the ticket
+				_ = sess.ReturnConnection(conn)
+				continue
+			}
+
+			supplyErr := irodsclient_irodsfs.SupplyTicket(conn, irodsTicket)
+			if supplyErr != nil {
+				// drop it rather than leave a connection with the old ticket
+				logger.WithError(supplyErr).Debug("failed to switch ticket, discarding connection")
+				sess.DiscardConnection(conn)
+				continue
+			}
+
+			_ = sess.ReturnConnection(conn)
+		}
+
+		if err != nil && len(conns) == 0 {
+			return errors.Wrapf(err, "failed to switch to iRODS ticket %q", irodsTicket)
+		}
+	}
+
+	logger.Debug("switched ticket")
+	return nil
+}
+
+func (get *GetCommand) processTicketGroup(mdRepoTickets []mdrepo.MDRepoTicket) error {
+	if len(mdRepoTickets) == 0 {
+		return nil
 	}
 
 	// parallel job manager - created once for the entire ticket group

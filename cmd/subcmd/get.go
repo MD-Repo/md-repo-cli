@@ -368,8 +368,15 @@ func (get *GetCommand) ensureTargetIsDir(targetPath string) error {
 	targetStat, err := os.Stat(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// not exist
-			return types.NewNotDirError(targetPath)
+			// create it, and any missing parents; the token has already been
+			// checked, so a bad token never leaves an empty directory
+			mkdirErr := os.MkdirAll(targetPath, 0755)
+			if mkdirErr != nil {
+				return errors.Wrapf(mkdirErr, "failed to create directory %q", targetPath)
+			}
+
+			terminal.Printf("Created directory %s\n", targetPath)
+			return nil
 		}
 
 		return errors.Wrapf(err, "failed to stat %q", targetPath)

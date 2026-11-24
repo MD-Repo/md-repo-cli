@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -47,6 +49,7 @@ func AddGetCommand(rootCmd *cobra.Command) {
 
 	flag.SetTokenFlags(getCmd)
 	flag.SetParallelTransferFlags(getCmd, false, false)
+	flag.SetJobsFlags(getCmd)
 	flag.SetForceFlags(getCmd, false)
 	flag.SetProgressFlags(getCmd)
 	flag.SetRetryFlags(getCmd)
@@ -70,20 +73,17 @@ type GetCommand struct {
 	commonFlagValues           *flag.CommonFlagValues
 	tokenFlagValues            *flag.TokenFlagValues
 	parallelTransferFlagValues *flag.ParallelTransferFlagValues
+	jobsFlagValues             *flag.JobsFlagValues
 	forceFlagValues            *flag.ForceFlagValues
 	progressFlagValues         *flag.ProgressFlagValues
 	retryFlagValues            *flag.RetryFlagValues
 	transferReportFlagValues   *flag.TransferReportFlagValues
 
-	maxConnectionNum int
-
-	account      *irodsclient_types.IRODSAccount
-	filesystem   *irodsclient_fs.FileSystem
-	webdavClient *webdav.WebDAVClient
-
 	targetPath string
 
-	parallelTransferJobManager *parallel.ParallelJobManager
+	// set when several jobs run at once: their progress bars and messages
+	// all go to this one display
+	sharedProgressWriter progress.Writer
 
 	transferReportManager *transfer.TransferReportManager
 	config                *config.Config
@@ -98,12 +98,17 @@ func NewGetCommand(command *cobra.Command, args []string) (*GetCommand, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid parallel transfer flag")
 	}
+	jobsFlagValues, err := flag.GetJobsFlagValues()
+	if err != nil {
+		return nil, err
+	}
 	get := &GetCommand{
 		command: command,
 
 		commonFlagValues:           flag.GetCommonFlagValues(command),
 		tokenFlagValues:            flag.GetTokenFlagValues(),
 		parallelTransferFlagValues: parallelTransferFlagValues,
+		jobsFlagValues:             jobsFlagValues,
 		forceFlagValues:            flag.GetForceFlagValues(),
 		progressFlagValues:         flag.GetProgressFlagValues(),
 		retryFlagValues:            flag.GetRetryFlagValues(),
@@ -114,8 +119,6 @@ func NewGetCommand(command *cobra.Command, args []string) (*GetCommand, error) {
 		totalDownloadedBytes: 0,
 		startTime:            time.Now(),
 	}
-
-	get.maxConnectionNum = get.parallelTransferFlagValues.ThreadNumber
 
 	// path
 	get.targetPath = "./"
@@ -194,34 +197,9 @@ func (get *GetCommand) Process() error {
 		ticketGroups[mdRepoTicket.IRODSTicket] = append(ticketGroups[mdRepoTicket.IRODSTicket], mdRepoTicket)
 	}
 
-	if len(ticketGroupOrder) > 0 {
-		// One iRODS client for the whole run. Every simulation has its own
-		// ticket, and logging in again for each one cost ~5 s per simulation
-		// (MDR-117), so the ticket is switched on the open connections
-		// instead.
-		err = get.openFilesystem(ticketGroups[ticketGroupOrder[0]][0])
-		if err != nil {
-			return err
-		}
-		defer func() {
-			get.filesystem.Release()
-			get.filesystem = nil
-		}()
-	}
-
-	for i, irodsTicket := range ticketGroupOrder {
-		if i > 0 {
-			err = get.switchTicket(irodsTicket)
-			if err != nil {
-				return err
-			}
-		}
-
-		group := ticketGroups[irodsTicket]
-		err = get.processTicketGroup(group)
-		if err != nil {
-			return err
-		}
+	err = get.runTicketGroups(ticketGroups, ticketGroupOrder)
+	if err != nil {
+		return err
 	}
 
 	// print final summary
@@ -236,9 +214,163 @@ func (get *GetCommand) Process() error {
 	return nil
 }
 
-// openFilesystem creates the iRODS client used for the whole run, logged in
-// with the first ticket.
-func (get *GetCommand) openFilesystem(firstTicket mdrepo.MDRepoTicket) error {
+// getWorker downloads ticket groups (one per simulation) one after another
+// with its own iRODS client. With --jobs N, N workers run at once and share
+// the --thread_num connections.
+type getWorker struct {
+	*GetCommand
+
+	maxConnectionNum int
+
+	account      *irodsclient_types.IRODSAccount
+	filesystem   *irodsclient_fs.FileSystem
+	webdavClient *webdav.WebDAVClient
+
+	parallelTransferJobManager *parallel.ParallelJobManager
+}
+
+// runTicketGroups downloads every ticket group, --jobs groups at once.
+func (get *GetCommand) runTicketGroups(ticketGroups map[string][]mdrepo.MDRepoTicket, ticketGroupOrder []string) error {
+	if len(ticketGroupOrder) == 0 {
+		return nil
+	}
+
+	connections := splitConnections(get.parallelTransferFlagValues.ThreadNumber, min(get.jobsFlagValues.Jobs, len(ticketGroupOrder)))
+	if len(connections) < get.jobsFlagValues.Jobs && len(connections) < len(ticketGroupOrder) {
+		terminal.Printf("running %d jobs, not %d: each job needs one of the %d connections (--thread_num)\n", len(connections), get.jobsFlagValues.Jobs, get.parallelTransferFlagValues.ThreadNumber)
+	}
+
+	workers := make([]*getWorker, len(connections))
+	for i, conns := range connections {
+		workers[i] = &getWorker{
+			GetCommand:       get,
+			maxConnectionNum: conns,
+		}
+	}
+
+	defer func() {
+		for _, worker := range workers {
+			worker.release()
+		}
+	}()
+
+	if len(workers) > 1 {
+		terminal.Printf("downloading %d simulations, %d at once\n", len(ticketGroupOrder), len(workers))
+
+		if !get.progressFlagValues.NoProgress {
+			get.sharedProgressWriter = terminal.GetProgressWriter(true)
+			go get.sharedProgressWriter.Render()
+
+			defer func() {
+				get.sharedProgressWriter.Stop()
+				for get.sharedProgressWriter.IsRenderInProgress() {
+					time.Sleep(10 * time.Millisecond)
+				}
+				get.sharedProgressWriter = nil
+			}()
+		}
+	}
+
+	return runGroups(len(ticketGroupOrder), len(workers), func(workerIdx int, groupIdx int) error {
+		return workers[workerIdx].processTicketGroup(ticketGroups[ticketGroupOrder[groupIdx]])
+	})
+}
+
+// splitConnections shares total connections among jobs, as evenly as it can,
+// and returns each job's share. There are never more jobs than connections,
+// since a job needs at least one.
+func splitConnections(total int, jobs int) []int {
+	if total < 1 {
+		total = 1
+	}
+
+	if jobs < 1 {
+		jobs = 1
+	}
+
+	if jobs > total {
+		jobs = total
+	}
+
+	shares := make([]int, jobs)
+	for i := range shares {
+		shares[i] = total / jobs
+		if i < total%jobs {
+			shares[i]++
+		}
+	}
+
+	return shares
+}
+
+// runGroups calls run(worker, group) for groups 0..numGroups-1, with
+// numWorkers workers each taking the next group when it finishes one, so a
+// worker never runs two groups at once. After the first error no worker
+// starts another group; the groups already running finish. It returns every
+// error.
+func runGroups(numGroups int, numWorkers int, run func(workerIdx int, groupIdx int) error) error {
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+
+	var next int64 = -1
+	var failed atomic.Bool
+	var errMutex sync.Mutex
+	var errs []error
+
+	wg := sync.WaitGroup{}
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func(workerIdx int) {
+			defer wg.Done()
+
+			for !failed.Load() {
+				groupIdx := int(atomic.AddInt64(&next, 1))
+				if groupIdx >= numGroups {
+					return
+				}
+
+				err := run(workerIdx, groupIdx)
+				if err != nil {
+					failed.Store(true)
+
+					errMutex.Lock()
+					errs = append(errs, err)
+					errMutex.Unlock()
+					return
+				}
+			}
+		}(w)
+	}
+
+	wg.Wait()
+
+	return errors.Join(errs...)
+}
+
+// printf prints a message, above the progress bars when jobs share them.
+func (get *GetCommand) printf(format string, a ...any) {
+	if get.sharedProgressWriter != nil {
+		get.sharedProgressWriter.Log(strings.TrimRight(fmt.Sprintf(format, a...), "\n"))
+		return
+	}
+
+	terminal.Printf(format, a...)
+}
+
+// release closes the worker's iRODS client, if it opened one.
+func (get *getWorker) release() {
+	if get.filesystem != nil {
+		get.filesystem.Release()
+		get.filesystem = nil
+	}
+}
+
+// openFilesystem creates the iRODS client the worker uses for all its ticket
+// groups, logged in with the first one's ticket. Every simulation has its own
+// ticket, and logging in again for each one cost ~5 s per simulation
+// (MDR-117), so later groups switch the ticket on the open connections.
+func (get *getWorker) openFilesystem(firstTicket mdrepo.MDRepoTicket) error {
 	account, err := firstTicket.GetAccount()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get iRODS Account")
@@ -270,7 +402,7 @@ func (get *GetCommand) openFilesystem(firstTicket mdrepo.MDRepoTicket) error {
 // connections already open are given it with a "session" ticket request,
 // which replaces the connection's previous ticket. Called between ticket
 // groups, when no transfer is running.
-func (get *GetCommand) switchTicket(irodsTicket string) error {
+func (get *getWorker) switchTicket(irodsTicket string) error {
 	logger := log.WithFields(log.Fields{
 		"ticket": irodsTicket,
 	})
@@ -316,17 +448,42 @@ func (get *GetCommand) switchTicket(irodsTicket string) error {
 	return nil
 }
 
-func (get *GetCommand) processTicketGroup(mdRepoTickets []mdrepo.MDRepoTicket) error {
+func (get *getWorker) processTicketGroup(mdRepoTickets []mdrepo.MDRepoTicket) error {
 	if len(mdRepoTickets) == 0 {
 		return nil
+	}
+
+	// the worker's first group opens its client; later ones switch the ticket
+	if get.filesystem == nil {
+		err := get.openFilesystem(mdRepoTickets[0])
+		if err != nil {
+			return err
+		}
+	} else {
+		err := get.switchTicket(mdRepoTickets[0].IRODSTicket)
+		if err != nil {
+			return err
+		}
 	}
 
 	// parallel job manager - created once for the entire ticket group
 	ioSession := get.filesystem.GetIOSession()
 	get.parallelTransferJobManager = parallel.NewParallelJobManager(ioSession.GetMaxConnections(), !get.progressFlagValues.NoProgress, get.progressFlagValues.ShowFullPath, get.parallelTransferFlagValues.StopOnError)
+	if get.sharedProgressWriter != nil {
+		get.parallelTransferJobManager.SetProgressWriter(get.sharedProgressWriter)
+	}
+
+	// with several jobs these per-simulation lines would only be noise
+	stepf := terminal.Printf
+	if get.jobsFlagValues.Jobs > 1 {
+		stepf = func(format string, a ...any) (int, error) {
+			log.Debugf(format, a...)
+			return 0, nil
+		}
+	}
 
 	// schedule all paths in this ticket group
-	terminal.Printf("scheduling transfer...\n")
+	stepf("scheduling transfer...\n")
 
 	for i := range mdRepoTickets {
 		mdRepoTicket := &mdRepoTickets[i]
@@ -350,14 +507,14 @@ func (get *GetCommand) processTicketGroup(mdRepoTickets []mdrepo.MDRepoTicket) e
 	}
 
 	// start all scheduled transfers at once
-	terminal.Printf("start transfer...\n")
+	stepf("start transfer...\n")
 
 	transferErr := get.parallelTransferJobManager.Start()
 	if transferErr != nil {
 		return errors.Wrap(transferErr, "failed to perform transfer jobs")
 	}
 
-	terminal.Printf("done transfer...\n")
+	stepf("done transfer...\n")
 
 	return nil
 }
@@ -396,7 +553,7 @@ func (get *GetCommand) hasTransferStatusFile(targetPath string) bool {
 	return err == nil
 }
 
-func (get *GetCommand) getOne(mdRepoTicket *mdrepo.MDRepoTicket, targetPath string) error {
+func (get *getWorker) getOne(mdRepoTicket *mdrepo.MDRepoTicket, targetPath string) error {
 	logger := log.WithFields(log.Fields{
 		"irods_data_path": mdRepoTicket.IRODSDataPath,
 		"irods_ticket":    mdRepoTicket.IRODSTicket,
@@ -424,7 +581,7 @@ func (get *GetCommand) getOne(mdRepoTicket *mdrepo.MDRepoTicket, targetPath stri
 	return get.getFile(mdRepoTicket, sourceEntry, "", targetPath)
 }
 
-func (get *GetCommand) scheduleGet(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string) {
+func (get *getWorker) scheduleGet(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string) {
 	logger := log.WithFields(log.Fields{
 		"irods_data_path": mdRepoTicket.IRODSDataPath,
 		"irods_ticket":    mdRepoTicket.IRODSTicket,
@@ -555,7 +712,7 @@ func (get *GetCommand) downloadedTotals() (int64, int64) {
 	return atomic.LoadInt64(&get.totalDownloadedFiles), atomic.LoadInt64(&get.totalDownloadedBytes)
 }
 
-func (get *GetCommand) getFile(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string) error {
+func (get *getWorker) getFile(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, tempPath string, targetPath string) error {
 	logger := log.WithFields(log.Fields{
 		"irods_data_path": mdRepoTicket.IRODSDataPath,
 		"irods_ticket":    mdRepoTicket.IRODSTicket,
@@ -628,7 +785,7 @@ func (get *GetCommand) getFile(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntry *i
 	// check transfer status file
 	if get.hasTransferStatusFile(targetPath) {
 		// incomplete file - resume downloading
-		terminal.Printf("resume downloading a data object %q\n", targetPath)
+		get.printf("resume downloading a data object %q\n", targetPath)
 		logger.Debug("resume downloading a data object")
 
 		get.scheduleGet(mdRepoTicket, sourceEntry, tempPath, targetPath)
@@ -666,7 +823,7 @@ func (get *GetCommand) getFile(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntry *i
 
 					get.transferReportManager.AddFile(reportFile)
 
-					terminal.Printf("skip downloading a data object %q to %q. The file with the same hash already exists!\n", sourceEntry.Path, targetPath)
+					get.printf("skip downloading a data object %q to %q. The file with the same hash already exists!\n", sourceEntry.Path, targetPath)
 					logger.Debug("skip downloading a data object. The file with the same hash already exists!")
 					return nil
 				}
@@ -679,7 +836,7 @@ func (get *GetCommand) getFile(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntry *i
 	return nil
 }
 
-func (get *GetCommand) getDir(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, targetPath string) error {
+func (get *getWorker) getDir(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntry *irodsclient_fs.Entry, targetPath string) error {
 	logger := log.WithFields(log.Fields{
 		"irods_data_path": mdRepoTicket.IRODSDataPath,
 		"irods_ticket":    mdRepoTicket.IRODSTicket,
@@ -779,13 +936,14 @@ func (get *GetCommand) getDir(mdRepoTicket *mdrepo.MDRepoTicket, sourceEntry *ir
 	return nil
 }
 
-func (get *GetCommand) determineTransferMethod(size int64) (transfer.TransferMode, int) {
+func (get *getWorker) determineTransferMethod(size int64) (transfer.TransferMode, int) {
 	logger := log.WithFields(log.Fields{})
 
-	threads := parallel.CalculateThreadForTransferJob(size, get.parallelTransferFlagValues.ThreadNumberPerFile)
+	// a file never uses more than this worker's share of the connections
+	threads := parallel.CalculateThreadForTransferJob(size, min(get.parallelTransferFlagValues.ThreadNumberPerFile, get.maxConnectionNum))
 
 	// determine how to download
-	if get.parallelTransferFlagValues.SingleThread || get.parallelTransferFlagValues.ThreadNumber <= 2 || get.parallelTransferFlagValues.ThreadNumberPerFile == 1 {
+	if get.parallelTransferFlagValues.SingleThread || get.maxConnectionNum <= 2 || get.parallelTransferFlagValues.ThreadNumberPerFile == 1 {
 		threads = 1
 	}
 

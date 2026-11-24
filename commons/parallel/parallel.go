@@ -81,6 +81,7 @@ type ParallelJobManager struct {
 	showProgress            bool
 	showFullPath            bool
 	progressWriter          progress.Writer
+	sharedProgressWriter    bool // progressWriter is owned by the caller
 	progressTrackers        map[string]*progress.Tracker
 	progressTrackersByJob   map[string][]*progress.Tracker
 	progressTrackerCallback terminal.ProgressTrackerCallback
@@ -125,6 +126,18 @@ func NewParallelJobManager(weightCapacity int, showProgress bool, showFullPath b
 	manager.waitCond = sync.NewCond(&manager.mutex)
 
 	return manager
+}
+
+// SetProgressWriter makes the manager add its progress bars to a writer the
+// caller has already started rendering, instead of starting its own. The
+// caller stops it. Used when several managers run at once, so their bars
+// share one display. Must be called before Start.
+func (manager *ParallelJobManager) SetProgressWriter(writer progress.Writer) {
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+
+	manager.progressWriter = writer
+	manager.sharedProgressWriter = writer != nil
 }
 
 func (manager *ParallelJobManager) getNextJobIndex() int64 {
@@ -322,10 +335,12 @@ func (manager *ParallelJobManager) Start() error {
 
 func (manager *ParallelJobManager) startProgress() {
 	if manager.showProgress {
-		manager.progressWriter = terminal.GetProgressWriter(true)
-		messageWidth := terminal.GetProgressMessageWidth(true)
+		if !manager.sharedProgressWriter {
+			manager.progressWriter = terminal.GetProgressWriter(true)
+			go manager.progressWriter.Render()
+		}
 
-		go manager.progressWriter.Render()
+		messageWidth := terminal.GetProgressMessageWidth(true)
 
 		// add progress tracker callback
 		manager.progressTrackerCallback = func(taskType string, taskName string, processed int64, total int64, progressUnit progress.Units, errored bool) {
@@ -376,7 +391,7 @@ func (manager *ParallelJobManager) startProgress() {
 }
 
 func (manager *ParallelJobManager) endProgress() {
-	if manager.showProgress {
+	if manager.showProgress && !manager.sharedProgressWriter {
 		if manager.progressWriter != nil {
 			manager.progressWriter.Stop()
 		}

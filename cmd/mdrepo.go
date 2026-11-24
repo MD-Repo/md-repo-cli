@@ -72,6 +72,10 @@ func main() {
 
 	logger := log.WithFields(log.Fields{})
 
+	// accept --svc-url as well as --svc_url; set before adding the
+	// subcommands, which inherit it
+	rootCmd.SetGlobalNormalizationFunc(flag.NormalizeFlagName)
+
 	// attach common flags
 	flag.SetCommonFlags(rootCmd)
 
